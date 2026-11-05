@@ -205,6 +205,52 @@ fn init_links_the_repo_and_creates_the_project() {
 }
 
 #[test]
+fn init_in_a_subfolder_gives_that_app_its_own_project() {
+    let env = Env::new();
+    let repo = env.repo.path().join("myrepo");
+    let app = repo.join("app");
+    fs::create_dir_all(&app).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let mut c = env.cmd(KEY_A);
+    c.current_dir(&repo);
+    env.run_with(c, &["init"], None).ok().stderr_has("project myrepo");
+    let mut c = env.cmd(KEY_A);
+    c.current_dir(&app);
+    env.run_with(c, &["init"], None).ok().stderr_has("project myrepo-app");
+
+    assert!(app.join("hush.toml").exists() && repo.join("hush.toml").exists());
+    assert!(
+        !app.join(".gitignore").exists(),
+        ".env patterns belong in the repo root's .gitignore"
+    );
+    let mut c = env.cmd(KEY_A);
+    c.current_dir(&app);
+    env.run_with(
+        c,
+        &["set", "ONLY_APP"],
+        Some(
+            b"1
+",
+        ),
+    )
+    .ok()
+    .stderr_has("myrepo-app/dev");
+    let projects = env.hush(&["project", "list"]).ok().stdout();
+    assert!(
+        projects.contains("myrepo  (no secrets yet)") && projects.contains("myrepo-app  (dev)"),
+        "{projects}"
+    );
+}
+
+#[test]
 fn set_get_list_rm() {
     let env = Env::with_project("demo");
     env.set(&["API_KEY"], "first");

@@ -303,22 +303,36 @@ fn setup(home: PathBuf, recover: bool) -> Result<()> {
     Ok(())
 }
 
+/// Links the current folder. At the repo root that is the whole repo; in a subfolder such as
+/// `app/` it gives that app its own project, since hush uses the nearest hush.toml.
 fn init(home: &std::path::Path, name: Option<String>) -> Result<()> {
     vault::require_vault(home)?;
-    let root = config::repo_root(&std::env::current_dir()?);
-    let existing = config::read(&root)?;
+    let cwd = std::env::current_dir()?;
+    let root = config::repo_root(&cwd);
+    let at_root = match (cwd.canonicalize(), root.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => cwd == root,
+    };
+    let existing = config::read(&cwd)?;
     let name = match (name, &existing) {
         (Some(n), Some(f)) if n != f.project => {
-            bail!("{} already links this repo to project '{}'", config::FILE, f.project)
+            bail!("{} already links this folder to project '{}'", config::FILE, f.project)
         }
         (Some(n), _) => n,
         (None, Some(f)) => f.project.clone(),
-        (None, None) => config::default_name(&root),
+        (None, None) if at_root => config::default_name(&root),
+        (None, None) => {
+            let folder = cwd
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            format!("{}-{folder}", config::default_name(&root))
+        }
     };
     check_path_name("project", &name).context("pass a project name: hush init <name>")?;
     if existing.is_none() {
-        config::write(&root, &name)?;
-        eprintln!("Wrote {} for project {name}.", root.join(config::FILE).display());
+        config::write(&cwd, &name)?;
+        eprintln!("Wrote {} for project {name}.", cwd.join(config::FILE).display());
     }
     if vault::create_project(home, &name)? {
         eprintln!("Created project {name} in the vault.");
