@@ -32,3 +32,25 @@ Second workstream: D:/code (code-layer repo) for new-project + CLAUDE.md + hook 
 - Real keychain smoke (temp HUSH_HOME, no HUSH_KEY): setup stores + reads back from Windows Credential
   Manager, init/set work, re-setup verifies, setup after vault removal reuses the key; test credential
   deleted afterwards with cmdkey. Found and fixed: reused-key setup didn't show the recovery reminder.
+- Added: CLAUDECODE guard (agents can't get/export/recovery-key/--allow-prod); init links the current folder (monorepo apps).
+
+### Review round 1 (2026-11-05)
+- Security reviewer (Opus): CHANGES REQUESTED. Blocker: import parse errors echoed values. Should-fix: empty
+  HUSH_HOME/HUSH_KEY fell back to real vault/keychain; empty stdin wiped a value; import $-expansion could fold
+  HUSH_KEY/shell tokens into values; run passed HUSH_KEY to children; setup could mint a key over orphaned files.
+- Correctness reviewer (Opus): CHANGES REQUESTED. Same core items plus case-only name clashes on Windows and
+  wrong import counts on repeated keys.
+- Process change (Gabriel): orchestrator stops coding; fixes go to delegated workers. Rule merged on code-layer
+  main 11259dc (tiny changes inline allowed, building delegated).
+- Fix lane 1 (Opus worker) 6dd217e: all security items + hush.toml walk stops at repo root, prod* gate,
+  no-clobber vault.toml, CI permissions, README limits. Gates: 13 unit + 28 e2e green, each test mutation-checked.
+- Fix lane 2 (Opus worker) 4564d8c: case-clash refusal, distinct-key import counts, README test-script example.
+  Gates: 14 unit + 30 e2e green.
+- Issues filed (not blocking): #1 loader vars (NODE_OPTIONS...), #2 roaming vault/key on domain machines, #3 pin CI actions by SHA.
+- code-layer hush-routing: review round 1 → 6 fixes; round 2 → link_hush trusted exit 0 without files (fixed),
+  timeout, hints, ship pipe caveat. Merge order: hush v1 before hush-routing.
+
+## Open
+- Lane 3: `get` without trailing newline when piped (for `hush get | vercel env add`).
+- Final review round on the whole diff (Opus, correctness + security), then sol-loop on the final diff.
+- Move this journal into the PR description and delete .agent/ before Ready.
