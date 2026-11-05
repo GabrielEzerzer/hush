@@ -803,3 +803,82 @@ fn property_export_then_import_round_trips_any_values() {
         })
         .unwrap();
 }
+
+#[test]
+fn import_never_copies_the_environment_into_a_value() {
+    // hush's '$' scanner and dotenvy disagree here. The scanner reads `'\'` as a closed quote
+    // holding a backslash and the no-break space plus `#` as the start of a comment, so it passes
+    // the line. dotenvy's line splitter treats `\'` inside single quotes as an escape and so sees
+    // no comment, and its value parser expands `${...}`. The scanner is a friendly early error;
+    // what keeps the key out is that import empties its environment before parsing.
+    let env = Env::with_project("demo");
+    let src = env.repo.path().join(".env");
+    fs::write(&src, "A='\\'\u{a0}#${HUSH_KEY}${HUSHTTOKEN}'\\'\n").unwrap();
+    let mut c = env.cmd(KEY_A);
+    c.env("HUSHTTOKEN", "shell-token-5e2a");
+    env.run_with(c, &["import", src.to_str().unwrap()], None).ok();
+    let got = env.json("dev");
+    let value = &got["A"];
+    assert!(
+        !value.contains("8899aabb") && !value.contains("shell-token-5e2a"),
+        "the environment reached a stored value"
+    );
+    assert_eq!(value, "\\\u{a0}#\\");
+}
+
+#[test]
+fn import_accepts_a_utf8_byte_order_mark() {
+    let env = Env::with_project("demo");
+    let src = env.repo.path().join("bom.env");
+    fs::write(&src, b"\xef\xbb\xbfA=1\r\nB=2\r\n").unwrap();
+    env.hush(&["import", src.to_str().unwrap()])
+        .ok()
+        .stderr_has("Imported 2 secrets");
+    assert_eq!(
+        env.json("dev"),
+        BTreeMap::from([("A".into(), "1".into()), ("B".into(), "2".into())])
+    );
+}
+
+#[test]
+fn init_ignores_hush_project_from_the_environment() {
+    let env = Env::new();
+    let repo = env.repo.path().join("myrepo");
+    fs::create_dir_all(&repo).unwrap();
+    let mut c = env.cmd(KEY_A);
+    c.current_dir(&repo).env("HUSH_PROJECT", "leftover");
+    env.run_with(c, &["init"], None)
+        .ok()
+        .stderr_has("init ignores HUSH_PROJECT")
+        .stderr_has("project myrepo");
+    let toml = fs::read_to_string(repo.join("hush.toml")).unwrap();
+    assert!(toml.contains("project = \"myrepo\""), "{toml}");
+    assert!(!env.hush(&["project", "list"]).ok().stdout().contains("leftover"));
+
+    // An explicit -p still names the project, before or after the subcommand.
+    for (dir, args) in [
+        ("a", &["-p", "named-a", "init"][..]),
+        ("b", &["init", "--project", "named-b"]),
+    ] {
+        let sub = env.repo.path().join(dir);
+        fs::create_dir_all(&sub).unwrap();
+        let mut c = env.cmd(KEY_A);
+        c.current_dir(&sub).env("HUSH_PROJECT", "leftover");
+        env.run_with(c, args, None).ok();
+        let toml = fs::read_to_string(sub.join("hush.toml")).unwrap();
+        assert!(toml.contains(&format!("project = \"named-{dir}\"")), "{toml}");
+    }
+}
+
+#[test]
+fn setup_with_hush_key_refuses_a_vault_whose_vault_toml_is_missing() {
+    let env = Env {
+        home: TempDir::new().unwrap(),
+        repo: TempDir::new().unwrap(),
+    };
+    let project = env.home.path().join("projects").join("demo");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("dev.hush"), "sealed elsewhere").unwrap();
+    env.hush(&["setup"]).fails().stderr_has("vault.toml is missing");
+    assert!(!env.home.path().join("vault.toml").exists());
+}

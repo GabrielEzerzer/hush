@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use zeroize::Zeroizing;
 
 use crate::names::{check_case_clash, check_path_name, check_secret_name, check_secret_value, is_prod};
@@ -95,7 +96,14 @@ enum Format {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    // `hush init` links a repo for good, so it takes the project only from its arguments: a
+    // leftover HUSH_PROJECT must not link a new repo to another project.
+    if matches!(cli.cmd, Cmd::Init { .. }) && matches.value_source("project") == Some(ValueSource::EnvVariable) {
+        eprintln!("hush: init ignores HUSH_PROJECT; pass the name to use it: hush init <name>");
+        cli.project = None;
+    }
     match dispatch(cli) {
         Ok(code) => code,
         Err(e) => {
@@ -253,10 +261,19 @@ fn open(cli: &Cli, home: PathBuf) -> Result<(Vault, String, String)> {
 /// Claude Code sets CLAUDECODE in every shell it starts. Anything printed there goes into the
 /// model's context, so hush refuses to print values or unlock prod for it.
 fn refuse_agent(what: &str) -> Result<()> {
-    if std::env::var_os("CLAUDECODE").is_some_and(|v| !v.is_empty()) {
+    if agent_shell() {
         bail!("hush does not {what} inside an AI agent's shell (CLAUDECODE is set); run it in your own terminal");
     }
     Ok(())
+}
+
+fn agent_shell() -> bool {
+    std::env::var_os("CLAUDECODE").is_some_and(|v| !v.is_empty())
+}
+
+/// Setup prints a new recovery key only to a person at a terminal, never into an agent's shell.
+fn shows_recovery_key(terminal: bool, agent: bool) -> bool {
+    terminal && !agent
 }
 
 fn open_for_reading(cli: &Cli, home: PathBuf) -> Result<(Vault, String, String)> {
@@ -295,7 +312,7 @@ fn setup(home: PathBuf, recover: bool) -> Result<()> {
         );
     }
     if (out.new_key || out.created_vault) && !out.key_from_env {
-        if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        if shows_recovery_key(io::stdin().is_terminal() && io::stdout().is_terminal(), agent_shell()) {
             let vault = Vault::open(home)?;
             eprintln!(
                 "\nRecovery key. Save it in your password manager now. Without it, a lost keychain means lost secrets:\n"
@@ -378,9 +395,13 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
     let (vault, project, env) = open(cli, home)?;
     let raw = Zeroizing::new(std::fs::read(file).with_context(|| format!("reading {}", file.display()))?);
     let text = std::str::from_utf8(&raw).map_err(|_| anyhow!("{} is not UTF-8 text", file.display()))?;
+    // Windows editors often save a UTF-8 byte order mark, which neither parser expects.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let entries = dotenv_entries(file, text)?;
+    clear_env();
     // A repeated key keeps its last value, as in dotenv, and counts once.
     let mut pairs = std::collections::BTreeMap::new();
-    for (line, entry) in dotenv_entries(file, text)? {
+    for (line, entry) in entries {
         for item in dotenvy::from_read_iter(entry.as_bytes()) {
             // dotenvy's error text quotes the whole line, value included, so it never reaches the user.
             let Ok((k, v)) = item else {
@@ -411,6 +432,19 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
     );
     eprintln!("Delete {} once the app starts through `hush run`.", file.display());
     Ok(())
+}
+
+/// dotenvy fills `$NAME` and `${NAME}` from the process environment. `dotenv_entries` refuses an
+/// unescaped `$` first, but it is a second parser that can disagree with dotenvy, so import empties
+/// the environment before parsing: whatever dotenvy expands finds nothing to copy. Everything
+/// import needs from the environment (HUSH_HOME, HUSH_KEY, HUSH_PROJECT, HUSH_ENV) is resolved
+/// by then.
+fn clear_env() {
+    for (k, _) in std::env::vars_os() {
+        // SAFETY: hush is single-threaded on the import path, so no other thread reads or writes
+        // the environment while it is changed.
+        unsafe { std::env::remove_var(k) };
+    }
 }
 
 /// Splits a dotenv file into entries that each start on a new line and end outside any quote,
@@ -497,4 +531,17 @@ fn dotenv_line(name: &str, value: &str) -> Zeroizing<String> {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_recovery_key_is_shown_only_to_a_person_at_a_terminal() {
+        assert!(shows_recovery_key(true, false));
+        assert!(!shows_recovery_key(true, true), "printed into an agent's shell");
+        assert!(!shows_recovery_key(false, false));
+        assert!(!shows_recovery_key(false, true));
+    }
 }

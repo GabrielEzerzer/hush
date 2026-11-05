@@ -122,6 +122,11 @@ pub struct SetupOutcome {
 /// Creates the vault, or verifies an existing one. Never overwrites a key already in the keychain.
 pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> {
     let meta = read_meta(home)?;
+    // Writing a new vault.toml next to encrypted files would tie them to a key they were not
+    // sealed with. A recovery key is the way back in, so only that may proceed.
+    if meta.is_none() && recovered.is_none() {
+        refuse_orphaned_files(home)?;
+    }
     let mut new_key = false;
     let key_from_env;
     let key = if let Some(k) = env_key()? {
@@ -159,7 +164,6 @@ pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> 
                     "the vault at {} exists but its key is not in the OS keychain; run `hush setup --recover` with your recovery key",
                     home.display()
                 );
-                refuse_orphaned_files(home)?;
                 let k = crypto::new_key();
                 keychain::store(&k)?;
                 new_key = true;

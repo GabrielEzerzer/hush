@@ -61,13 +61,13 @@ Any program works the same way: `hush run -- python main.py`, `hush run -- cargo
 | `hush export [--format dotenv\|json]` | Print every secret, for copying into a hosting platform's settings |
 | `hush run -- CMD...` | Run a command with the secrets in its environment |
 
-Every command takes `-p/--project` (default: the project in `hush.toml`) and `-e/--env` (default: `dev`). `HUSH_PROJECT` and `HUSH_ENV` set the same things.
+Every command takes `-p/--project` (default: the project in `hush.toml`) and `-e/--env` (default: `dev`). `HUSH_PROJECT` and `HUSH_ENV` set the same things. `hush init` is the exception: it ignores `HUSH_PROJECT`, so a value left over from another repo can't link this one to the wrong project. Pass the name, as in `hush init NAME` or `hush init -p NAME`.
 
 To pipe a value in, for example from a script: `printf '%s' "$VALUE" | hush set NAME`. One trailing newline (or CRLF) is removed. An empty value is refused and the stored secret stays as it was.
 
 Secret names that differ only in case, such as `db_url` and `DB_URL`, are refused in one environment, because Windows treats them as one variable.
 
-`hush import` refuses a file that holds a `$` outside single quotes, unless it is escaped as `\$` or sits in a comment. Dotenv parsers replace `$NAME` and `${NAME}` with variables from the environment, so such a file could copy `HUSH_KEY` or a shell token into a stored value. The error names the line; single-quote the value or escape the `$`, then import again. Nothing is written until the whole file passes. Parse errors name the file and line but never show the line's content, since it may hold a value.
+`hush import` refuses a file that holds a `$` outside single quotes, unless it is escaped as `\$` or sits in a comment. Dotenv parsers replace `$NAME` and `${NAME}` with variables from the environment, so such a file could copy `HUSH_KEY` or a shell token into a stored value. As a second safeguard, `hush import` empties its own environment before it parses the file, so a `$` the check misses has nothing to copy. The error names the line; single-quote the value or escape the `$`, then import again. Nothing is written until the whole file passes. Parse errors name the file and line but never show the line's content, since it may hold a value. A UTF-8 byte order mark at the start of the file, which some Windows editors add, is ignored.
 
 ## Environments
 
