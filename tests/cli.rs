@@ -591,7 +591,51 @@ fn import_refuses_unescaped_dollar_and_writes_nothing() {
     fs::write(&src, "# costs $5\nA=1 # see $HOME\n").unwrap();
     env.hush(&["import", src.to_str().unwrap()])
         .ok()
-        .stderr_has("Imported 1 secrets");
+        .stderr_has("Imported 1 secret into");
+}
+
+#[test]
+fn a_repeated_key_in_an_import_counts_once_and_the_last_value_wins() {
+    let env = Env::with_project("demo");
+    let src = env.repo.path().join(".env");
+    fs::write(&src, "A=1\nA=2\n").unwrap();
+    env.hush(&["import", src.to_str().unwrap()])
+        .ok()
+        .stderr_has("Imported 1 secret into demo/dev (1 new, 0 replaced).");
+    assert_eq!(env.get(&["A"]), "2");
+}
+
+#[test]
+fn names_that_differ_only_in_case_are_refused() {
+    let env = Env::with_project("demo");
+    env.set(&["db_url"], "one");
+    let before = fs::read(env.file("demo", "dev")).unwrap();
+
+    env.hush_in(&["set", "DB_URL"], "two\n")
+        .fails()
+        .stderr_has("DB_URL differs from db_url in demo/dev only by case");
+    assert_eq!(fs::read(env.file("demo", "dev")).unwrap(), before);
+
+    let src = env.repo.path().join(".env");
+    fs::write(&src, "OTHER=x\nDB_URL=two\n").unwrap();
+    env.hush(&["import", src.to_str().unwrap()])
+        .fails()
+        .stderr_has("DB_URL differs from db_url in demo/dev only by case");
+    assert_eq!(fs::read(env.file("demo", "dev")).unwrap(), before);
+
+    // Two such names within one file, into an empty environment.
+    fs::write(&src, "db_url=1\nDB_URL=2\n").unwrap();
+    env.hush(&["-e", "fresh", "import", src.to_str().unwrap()])
+        .fails()
+        .stderr_has("DB_URL differs from db_url in");
+    assert!(!env.file("demo", "fresh").exists());
+
+    // The exact same name is still an update, and another environment is separate.
+    env.hush_in(&["set", "db_url"], "three\n")
+        .ok()
+        .stderr_has("Updated db_url");
+    assert_eq!(env.get(&["db_url"]), "three");
+    env.set(&["-e", "test", "DB_URL"], "four");
 }
 
 #[test]

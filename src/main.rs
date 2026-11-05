@@ -13,7 +13,7 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use zeroize::Zeroizing;
 
-use crate::names::{check_path_name, check_secret_name, check_secret_value, is_prod};
+use crate::names::{check_case_clash, check_path_name, check_secret_name, check_secret_value, is_prod};
 use crate::vault::{Secrets, Vault};
 
 /// Per-project encrypted secrets, injected into apps at runtime.
@@ -159,6 +159,7 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             let value = read_value(name)?;
             check_secret_value(name, &value)?;
             let replaced = vault.update(&project, &env, |s| {
+                check_case_clash(s.keys().map(String::as_str), name, &format!("{project}/{env}"))?;
                 Ok(s.insert(name.clone(), value.to_string()).is_some())
             })?;
             eprintln!(
@@ -371,7 +372,8 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
     let (vault, project, env) = open(cli, home)?;
     let raw = Zeroizing::new(std::fs::read(file).with_context(|| format!("reading {}", file.display()))?);
     let text = std::str::from_utf8(&raw).map_err(|_| anyhow!("{} is not UTF-8 text", file.display()))?;
-    let mut pairs = Vec::new();
+    // A repeated key keeps its last value, as in dotenv, and counts once.
+    let mut pairs = std::collections::BTreeMap::new();
     for (line, entry) in dotenv_entries(file, text)? {
         for item in dotenvy::from_read_iter(entry.as_bytes()) {
             // dotenvy's error text quotes the whole line, value included, so it never reaches the user.
@@ -381,18 +383,24 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
             let v = Zeroizing::new(v);
             check_secret_name(&k)?;
             check_secret_value(&k, &v)?;
-            pairs.push((k, v));
+            check_case_clash(pairs.keys().map(String::as_str), &k, &file.display().to_string())?;
+            pairs.insert(k, v);
         }
     }
     let total = pairs.len();
     let replaced = vault.update(&project, &env, |s| {
+        let place = format!("{project}/{env}");
+        for k in pairs.keys() {
+            check_case_clash(s.keys().map(String::as_str), k, &place)?;
+        }
         Ok(pairs
             .into_iter()
             .filter(|(k, v)| s.insert(k.clone(), v.to_string()).is_some())
             .count())
     })?;
     eprintln!(
-        "Imported {total} secrets into {project}/{env} ({} new, {replaced} replaced).",
+        "Imported {total} {} into {project}/{env} ({} new, {replaced} replaced).",
+        if total == 1 { "secret" } else { "secrets" },
         total - replaced
     );
     eprintln!("Delete {} once the app starts through `hush run`.", file.display());

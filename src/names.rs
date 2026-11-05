@@ -1,6 +1,6 @@
 //! Validation for every name that reaches the filesystem or a child's environment.
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 
 /// Device names Windows reserves in any folder, with or without an extension.
 const WINDOWS_RESERVED: &[&str] = &["con", "prn", "aux", "nul"];
@@ -35,6 +35,21 @@ pub fn check_secret_name(s: &str) -> Result<()> {
         first && rest && s.len() <= 256,
         "invalid secret name '{s}': use letters, digits and '_', not starting with a digit"
     );
+    Ok(())
+}
+
+/// Windows environment variable names ignore case, so two names that differ only in case collapse
+/// into one in the child and either value may win. Refused on every platform so a vault behaves
+/// the same everywhere. The exact same name is not a clash: setting it again is an update.
+pub fn check_case_clash<'a>(existing: impl IntoIterator<Item = &'a str>, name: &str, place: &str) -> Result<()> {
+    if let Some(other) = existing
+        .into_iter()
+        .find(|k| *k != name && k.eq_ignore_ascii_case(name))
+    {
+        bail!(
+            "{name} differs from {other} in {place} only by case; Windows treats them as one environment variable, so use {other} or remove it first. Nothing was stored."
+        );
+    }
     Ok(())
 }
 
@@ -78,6 +93,17 @@ mod tests {
         for bad in ["", "1A", "A-B", "A B", "A=B", "A.B", "É"] {
             assert!(check_secret_name(bad).is_err(), "{bad:?} accepted");
         }
+    }
+
+    #[test]
+    fn names_differing_only_in_case_clash() {
+        let existing = ["db_url", "OTHER"];
+        let err = check_case_clash(existing, "DB_URL", "demo/dev")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("differs from db_url"), "{err}");
+        check_case_clash(existing, "db_url", "demo/dev").unwrap();
+        check_case_clash(existing, "DB_URL2", "demo/dev").unwrap();
     }
 
     #[test]

@@ -29,14 +29,17 @@ hush run -- npm run dev       # starts the app with the secrets in its environme
 
 Commit `hush.toml`. It only names the vault project (`project = "my-app"`), and it is how every checkout and worktree of the repo finds its secrets. Hush looks for it in the current folder and every folder above it, up to the repo root (the first folder that holds `.git`), so a stray `hush.toml` above the repo is ignored.
 
-Point the app's scripts at `hush run` so nobody has to remember it:
+Point the scripts that need secrets at `hush run` so nobody has to remember it:
 
 ```json
 "scripts": {
   "dev": "hush run -- next dev",
-  "test": "hush run -e test -- vitest"
+  "build": "next build",
+  "test": "vitest"
 }
 ```
+
+Only `dev` and scripts that need secrets go through `hush run`. Keep `build`, and tests that need no secrets, as plain commands, so CI, Vercel and cloud sandboxes, which have no vault, can still run them.
 
 Any program works the same way: `hush run -- python main.py`, `hush run -- cargo run`, `hush run -- supabase start`. The app reads its secrets from environment variables as it already does. A value in the vault takes precedence over a variable of the same name already set in the shell. On Windows, `hush run` finds `.cmd` and `.bat` shims on `PATH`, so `npm`, `npx` and `pnpm` work by name. If `HUSH_KEY` is set in the shell, `hush run` removes it from the program's environment, since the program never needs the vault key.
 
