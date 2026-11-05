@@ -14,25 +14,25 @@ The demo uses a throwaway vault and fake values. [`docs-assets/demo.tape`](docs-
 |---|---|---|
 | Windows | Windows Credential Manager | Tested; this is the platform hush is used on |
 | macOS | Keychain | Built and tested in CI, but the Keychain code has not been tried on a real Mac |
-| Linux | none yet | No keychain support. Set `HUSH_KEY` instead ([tracking issue](https://github.com/GabrielEzerzer/hushvault/issues/9)) |
+| Linux | none yet | No keychain support. Set `HUSH_KEY` instead ([tracking issue](https://github.com/GabrielEzerzer/hush/issues/9)) |
 
 The tests run on all three in CI. They use `HUSH_KEY`, so they never touch a keychain.
 
 ## Install
 
-**Prebuilt binaries.** Download the archive for your platform from the [Releases page](https://github.com/GabrielEzerzer/hushvault/releases), unpack it, and put `hush` (`hush.exe` on Windows) somewhere on your `PATH`. Each release has a `SHA256SUMS` file to check the download against.
+**Prebuilt binaries.** Download the archive for your platform from the [Releases page](https://github.com/GabrielEzerzer/hush/releases), unpack it, and put `hush` (`hush.exe` on Windows) somewhere on your `PATH`. Each release has a `SHA256SUMS` file to check the download against.
 
-**With Cargo.** The crate is called `hushvault`, because `hush` was taken on crates.io. The command it installs is still `hush`.
+**With Cargo.** hush is not on crates.io yet, so install it straight from this repo. The command it installs is `hush`.
 
 ```sh
-cargo install hushvault
+cargo install --git https://github.com/GabrielEzerzer/hush --locked
 ```
 
 **From source.** You need Rust 1.89 or newer.
 
 ```sh
-git clone https://github.com/GabrielEzerzer/hushvault
-cd hushvault
+git clone https://github.com/GabrielEzerzer/hush
+cd hush
 cargo install --path .        # puts hush in ~/.cargo/bin
 ```
 
