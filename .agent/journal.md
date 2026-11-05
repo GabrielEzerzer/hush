@@ -24,6 +24,14 @@ reading: away · metric(100% acceptance scenarios) · critical · logic
   Gabriel runs `hush set NAME` himself.
 
 ## Rounds
+### Baseline (2026-11-05), eval suite 74203ae by Sol
+- Against code-layer main's setup/new-project.py: dev 24/27 (twice), test 11/13. All five failures are
+  requirement 2: main has no link_hush yet, because code-layer PR #1 (hush-routing) is unmerged.
+- Against hush-routing's new-project.py (what main becomes on merge): dev 27/27 twice (noise 0),
+  test 13/13. Re-run by the orchestrator, same scores. Every hush call uses temp HUSH_HOME + fixed HUSH_KEY.
+- Target met at baseline; no climbing rounds needed. The gap is a merge, which is Gabriel's.
+- Routing change mid-run (Gabriel): reviews back to normal (Claude reviewer rounds, Sol on the final diff).
+- code-layer 97d5749: secrets Gabriel gives go through request_secret (file) into `hush set`; project delete is his.
 
 ## Open
-- Sol builds the eval suite; baseline.
+- Review gate on the final diff: reviewer (Opus) rounds, then Sol.
