@@ -79,7 +79,9 @@ impl Env {
             .env("HUSH_KEY", key)
             .env_remove("HUSH_PROJECT")
             .env_remove("HUSH_ENV")
-            .env_remove("CLAUDECODE");
+            .env_remove("CLAUDECODE")
+            .env_remove("CLICOLOR_FORCE")
+            .env_remove("NO_COLOR");
         c
     }
 
@@ -881,4 +883,27 @@ fn setup_with_hush_key_refuses_a_vault_whose_vault_toml_is_missing() {
     fs::write(project.join("dev.hush"), "sealed elsewhere").unwrap();
     env.hush(&["setup"]).fails().stderr_has("vault.toml is missing");
     assert!(!env.home.path().join("vault.toml").exists());
+}
+
+#[test]
+fn colour_reaches_only_a_terminal_and_never_a_value() {
+    let env = Env::with_project("app");
+    env.set(&["TOKEN"], "abc");
+    let esc = |r: &Run| contains(&r.out.stdout, b"\x1b") || contains(&r.out.stderr, b"\x1b");
+    // Piped: plain, byte for byte.
+    for args in [&["list"][..], &["project", "list"], &["get", "TOKEN"], &["rm", "NOPE"]] {
+        assert!(!esc(&env.hush(args)), "escape codes in piped {args:?}");
+    }
+    // CLICOLOR_FORCE proves the colouring exists; values stay plain even then.
+    let mut forced = env.cmd(KEY_A);
+    forced.env("CLICOLOR_FORCE", "1");
+    assert!(esc(&env.run_with(forced, &["list"], None).ok()));
+    let mut forced = env.cmd(KEY_A);
+    forced.env("CLICOLOR_FORCE", "1");
+    let got = env.run_with(forced, &["get", "TOKEN"], None).ok();
+    assert_eq!(got.out.stdout, b"abc");
+    // NO_COLOR wins over CLICOLOR_FORCE.
+    let mut off = env.cmd(KEY_A);
+    off.env("CLICOLOR_FORCE", "1").env("NO_COLOR", "1");
+    assert!(!esc(&env.run_with(off, &["list"], None).ok()));
 }

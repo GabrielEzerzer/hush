@@ -2,6 +2,7 @@ mod config;
 mod crypto;
 mod names;
 mod run;
+mod style;
 mod vault;
 
 use std::ffi::OsString;
@@ -9,17 +10,19 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use anstream::{eprint, eprintln, println};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::parser::ValueSource;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use zeroize::Zeroizing;
 
 use crate::names::{check_case_clash, check_path_name, check_secret_name, check_secret_value, is_prod};
+use crate::style::{ACCENT, BRAND, DIM, ERR, HEADER, OK, paint};
 use crate::vault::{Secrets, Vault};
 
 /// Per-project encrypted secrets, injected into apps at runtime.
 #[derive(Parser)]
-#[command(name = "hush", version)]
+#[command(name = "hush", version, styles = style::clap())]
 struct Cli {
     /// Vault project [default: the `project` in the nearest hush.toml]
     #[arg(short, long, global = true, env = "HUSH_PROJECT")]
@@ -104,14 +107,18 @@ fn main() -> ExitCode {
         && matches.value_source("project") == Some(ValueSource::EnvVariable)
     {
         if name.is_none() {
-            eprintln!("hush: init ignores HUSH_PROJECT; pass the name to use it: hush init <name>");
+            eprintln!(
+                "{}: init ignores HUSH_PROJECT; pass the name to use it: {}",
+                paint(BRAND, "hush"),
+                paint(ACCENT, "hush init <name>")
+            );
         }
         cli.project = None;
     }
     match dispatch(cli) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("hush: {e:#}");
+            eprintln!("{} {e:#}", paint(ERR, "hush:"));
             ExitCode::FAILURE
         }
     }
@@ -134,7 +141,10 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         Cmd::Project(ProjectCmd::List) => {
             let projects = vault::projects(&home)?;
             if projects.is_empty() {
-                eprintln!("No projects yet. Run `hush init` in a repo to create one.");
+                eprintln!(
+                    "No projects yet. Run `{}` in a repo to create one.",
+                    paint(ACCENT, "hush init")
+                );
             }
             for (name, envs) in projects {
                 let envs = if envs.is_empty() {
@@ -142,14 +152,14 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
                 } else {
                     envs.join(", ")
                 };
-                println!("{name}  ({envs})");
+                println!("{}  {}", paint(ACCENT, &name), paint(DIM, format!("({envs})")));
             }
         }
         Cmd::Project(ProjectCmd::Create { ref name }) => {
             if vault::create_project(&home, name)? {
-                eprintln!("Created project {name}.");
+                eprintln!("{} {}.", paint(OK, "Created project"), paint(ACCENT, name));
             } else {
-                eprintln!("Project {name} already exists.");
+                eprintln!("Project {} already exists.", paint(ACCENT, name));
             }
         }
         Cmd::Project(ProjectCmd::Delete { ref name }) => {
@@ -158,12 +168,15 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
                 io::stdin().is_terminal(),
                 "deleting a project needs an interactive terminal"
             );
-            eprint!("This deletes project {name} and every secret in it. Type the project name to confirm: ");
+            eprint!(
+                "This deletes project {} and every secret in it. Type the project name to confirm: ",
+                paint(ACCENT, name)
+            );
             let mut typed = String::new();
             io::stdin().read_line(&mut typed)?;
             ensure!(typed.trim() == name, "names did not match; nothing deleted");
             vault::delete_project(&home, name)?;
-            eprintln!("Deleted project {name}.");
+            eprintln!("{} {}.", paint(OK, "Deleted project"), paint(ACCENT, name));
         }
         Cmd::Set { ref name } => {
             let (vault, project, env) = open(&cli, home)?;
@@ -175,8 +188,10 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
                 Ok(s.insert(name.clone(), value.to_string()).is_some())
             })?;
             eprintln!(
-                "{} {name} in {project}/{env}.",
-                if replaced { "Updated" } else { "Stored" }
+                "{} {} in {}.",
+                paint(OK, if replaced { "Updated" } else { "Stored" }),
+                paint(ACCENT, name),
+                paint(DIM, format!("{project}/{env}"))
             );
         }
         Cmd::Get { ref name } => {
@@ -198,10 +213,10 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             let (vault, project, env) = open(&cli, home)?;
             let secrets = vault.read(&project, &env)?.unwrap_or_default();
             if secrets.is_empty() {
-                eprintln!("No secrets in {project}/{env}.");
+                eprintln!("No secrets in {}.", paint(DIM, format!("{project}/{env}")));
             }
             for name in secrets.keys() {
-                println!("{name}");
+                println!("{}", paint(ACCENT, name));
             }
         }
         Cmd::Rm { ref name } => {
@@ -211,7 +226,12 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
                     .map(drop)
                     .with_context(|| format!("no secret {name} in {project}/{env}"))
             })?;
-            eprintln!("Removed {name} from {project}/{env}.");
+            eprintln!(
+                "{} {} from {}.",
+                paint(OK, "Removed"),
+                paint(ACCENT, name),
+                paint(DIM, format!("{project}/{env}"))
+            );
         }
         Cmd::Import { ref file } => import(&cli, home, file)?,
         Cmd::Export { format } => {
@@ -231,7 +251,11 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         Cmd::Run { ref command } => {
             let (vault, project, env) = open_for_reading(&cli, home)?;
             let secrets = vault.read(&project, &env)?.unwrap_or_else(|| {
-                eprintln!("hush: no secrets stored in {project}/{env}; running without any");
+                eprintln!(
+                    "{}: no secrets stored in {}; running without any",
+                    paint(BRAND, "hush"),
+                    paint(DIM, format!("{project}/{env}"))
+                );
                 Secrets::new()
             });
             drop(vault);
@@ -308,23 +332,29 @@ fn setup(home: PathBuf, recover: bool) -> Result<()> {
         "the OS keychain"
     };
     if out.created_vault {
-        eprintln!("Created the vault at {}, with its key in {source}.", home.display());
+        eprintln!(
+            "{} at {}, with its key in {source}.",
+            paint(OK, "Created the vault"),
+            paint(DIM, home.display())
+        );
     } else {
         eprintln!(
             "The vault at {} is set up and its key in {source} matches.",
-            home.display()
+            paint(DIM, home.display())
         );
     }
     if (out.new_key || out.created_vault) && !out.key_from_env {
         if shows_recovery_key(io::stdin().is_terminal() && io::stdout().is_terminal(), agent_shell()) {
             let vault = Vault::open(home)?;
             eprintln!(
-                "\nRecovery key. Save it in your password manager now. Without it, a lost keychain means lost secrets:\n"
+                "\n{} Save it in your password manager now. Without it, a lost keychain means lost secrets:\n",
+                paint(HEADER, "Recovery key.")
             );
             println!("    {}\n", *crypto::encode_key(vault.key()));
         } else {
             eprintln!(
-                "Run `hush recovery-key` in a terminal and save the key in your password manager. Without it, a lost keychain means lost secrets."
+                "Run `{}` in a terminal and save the key in your password manager. Without it, a lost keychain means lost secrets.",
+                paint(ACCENT, "hush recovery-key")
             );
         }
     }
@@ -360,19 +390,41 @@ fn init(home: &std::path::Path, name: Option<String>) -> Result<()> {
     check_path_name("project", &name).context("pass a project name: hush init <name>")?;
     if existing.is_none() {
         config::write(&cwd, &name)?;
-        eprintln!("Wrote {} for project {name}.", cwd.join(config::FILE).display());
+        eprintln!(
+            "{} {} for project {}.",
+            paint(OK, "Wrote"),
+            paint(DIM, cwd.join(config::FILE).display()),
+            paint(ACCENT, &name)
+        );
     }
     if vault::create_project(home, &name)? {
-        eprintln!("Created project {name} in the vault.");
+        eprintln!(
+            "{} {} in the vault.",
+            paint(OK, "Created project"),
+            paint(ACCENT, &name)
+        );
     } else {
-        eprintln!("Linked to existing project {name}.");
+        eprintln!("{} {}.", paint(OK, "Linked to existing project"), paint(ACCENT, &name));
     }
     if config::ignore_env_files(&root)? {
         eprintln!("Added .env patterns to .gitignore.");
     }
-    eprintln!(
-        "\nNext:\n  hush set NAME                 store a secret (prompts for the value)\n  hush import .env.local        move an existing .env file into the vault, then delete the file\n  hush run -- npm run dev       start the app with its secrets"
-    );
+    eprintln!("\n{}", paint(HEADER, "Next:"));
+    for (cmd, what) in [
+        ("hush set NAME", "store a secret (prompts for the value)"),
+        (
+            "hush import .env.local",
+            "move an existing .env file into the vault, then delete the file",
+        ),
+        ("hush run -- npm run dev", "start the app with its secrets"),
+    ] {
+        eprintln!(
+            "  {}{} {}",
+            paint(ACCENT, cmd),
+            " ".repeat(29 - cmd.len()),
+            paint(DIM, what)
+        );
+    }
     Ok(())
 }
 
@@ -430,11 +482,17 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
             .count())
     })?;
     eprintln!(
-        "Imported {total} {} into {project}/{env} ({} new, {replaced} replaced).",
+        "{} {total} {} into {} {}.",
+        paint(OK, "Imported"),
         if total == 1 { "secret" } else { "secrets" },
-        total - replaced
+        paint(ACCENT, format!("{project}/{env}")),
+        paint(DIM, format!("({} new, {replaced} replaced)", total - replaced))
     );
-    eprintln!("Delete {} once the app starts through `hush run`.", file.display());
+    eprintln!(
+        "Delete {} once the app starts through `{}`.",
+        paint(DIM, file.display()),
+        paint(ACCENT, "hush run")
+    );
     Ok(())
 }
 
