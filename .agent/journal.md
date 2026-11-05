@@ -57,8 +57,14 @@ Second workstream: D:/code (code-layer repo) for new-project + CLAUDE.md + hook 
   Should-fix: import $ guard is a second parser that must match dotenvy (fix: clear process env before parsing);
   UTF-8 BOM import refused; setup prints the recovery key without the agent check. Nits: init takes HUSH_PROJECT
   from env; orphaned-files check only on the key-minting path.
-- Fix lane 4 (Opus worker): all five, running.
+- Fix lane 4 (Opus worker) 3df469b: all five; env cleared before dotenvy parses (guard test uses a real
+  scanner/dotenvy gap), BOM stripped, setup key gated on the agent check, init ignores env HUSH_PROJECT,
+  orphan check on every key source. Gates: 15 unit + 35 e2e green, mutation-checked. Scanner gap → issue #4.
+
+### Review round 3 (2026-11-05)
+- Reviewer (Opus) on 61131e4..3df469b: APPROVE, 3 nits. Orchestrator fixed two inline (SAFETY comment
+  wording; init note only when no name passed). `--recover` not checked against orphaned files → issue #5.
 
 ## Open
-- Lane 4 result, then re-review of the lane 4 diff, then sol-loop on the final diff.
+- sol-loop on the final diff (c8b2112..HEAD).
 - Move this journal into the PR description and delete .agent/ before Ready.

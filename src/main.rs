@@ -100,8 +100,12 @@ fn main() -> ExitCode {
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     // `hush init` links a repo for good, so it takes the project only from its arguments: a
     // leftover HUSH_PROJECT must not link a new repo to another project.
-    if matches!(cli.cmd, Cmd::Init { .. }) && matches.value_source("project") == Some(ValueSource::EnvVariable) {
-        eprintln!("hush: init ignores HUSH_PROJECT; pass the name to use it: hush init <name>");
+    if let Cmd::Init { name } = &cli.cmd
+        && matches.value_source("project") == Some(ValueSource::EnvVariable)
+    {
+        if name.is_none() {
+            eprintln!("hush: init ignores HUSH_PROJECT; pass the name to use it: hush init <name>");
+        }
         cli.project = None;
     }
     match dispatch(cli) {
@@ -441,8 +445,9 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
 /// by then.
 fn clear_env() {
     for (k, _) in std::env::vars_os() {
-        // SAFETY: hush is single-threaded on the import path, so no other thread reads or writes
-        // the environment while it is changed.
+        // SAFETY: hush starts no threads of its own before this point; the only one it ever starts
+        // is the ctrlc handler in `run`. On macOS the keychain call may leave system threads behind;
+        // they are not known to read the environment.
         unsafe { std::env::remove_var(k) };
     }
 }
