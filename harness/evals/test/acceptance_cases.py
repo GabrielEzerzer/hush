@@ -52,6 +52,19 @@ def unavailable_link(s):
     require(vault_before == s.vault_snapshot() and not s.project_names(), "helper modified vault without hush")
 
 
+@scenario("test-main-custom-note-path-stages-project-plumbing", 2)
+def main_custom_note(s):
+    s.setup()
+    repo, note, staged = s.new_project_main("batch-archive-2026", title="Archive batch",
+                                           vault_dir="experiments/archive batch")
+    require(s.project_names() == {"batch-archive-2026"}, "main omitted the archive vault project")
+    require(staged == {"README.md", "hush.toml", ".gitignore"}, "main staged the wrong initial files")
+    require('project = "batch-archive-2026"' in (repo / "hush.toml").read_text(), "main wrote an incorrect link")
+    require(s.ignored("services/worker/.env.preview", cwd=repo), "main did not protect nested dotenv files")
+    require(note.is_file() and "title: Archive batch" in note.read_text()
+            and "tags: [offline, fixture]" in note.read_text(), "main lost custom note metadata or location")
+
+
 @scenario("test-npm-dev-launches-a-commonjs-task-with-two-secrets", 3)
 def npm_commonjs(s):
     s.linked("node-task")
@@ -175,14 +188,19 @@ def no_service(s):
     empty = s.root / "support bin"
     empty.mkdir()
     minimal = str(s.binary.parent) + os.pathsep + str(empty)
+    # Fixture precondition, not a claim about hush behavior or installed machine tools.
     for tool in ("docker.exe", "wsl.exe", "podman.exe"):
-        require(shutil.which(tool, path=minimal) is None, "container executable present in allowlisted PATH")
+        require(shutil.which(tool, path=minimal) is None, "precondition: container executable present in allowlisted PATH")
     env = {"PATH": minimal}
     s.ok(s.hush("init", "native-batch", env=env), "native init")
     value = s.value()
     s.ok(s.hush("set", "NATIVE_AUTH", data=value.encode(), env=env))
     s.app_run({"NATIVE_AUTH": value}, code=29, env=env)
     s.denied(s.hush("run", "--", "missing-native-tool-acceptance", env=env), "command not found")
+    descendant = s.repo / "jobs/nightly"
+    descendant.mkdir(parents=True)
+    s.app_run({"NATIVE_AUTH": value}, cwd=descendant, code=29, env=env)
+    s.denied(s.hush("run", "--", "missing-native-tool-acceptance", cwd=descendant, env=env), "command not found")
     require(hush_processes() <= baseline, "hush left a daemon after app failure")
 
 

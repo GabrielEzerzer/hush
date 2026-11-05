@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent.parent
-TARGET = Path("C:/Users/gabri/AppData/Local/Temp/hush-acc-target")
+TARGET = Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target" / "acceptance").resolve()
 KEY = "42" * 32
 SCENARIOS = []
 
@@ -269,17 +269,55 @@ class Sandbox:
         output = self.ok(self.hush("project", "list"), "project list").stdout.decode()
         return {line.split("  (", 1)[0] for line in output.splitlines()}
 
-    def load_linker(self):
+    def load_new_project(self):
         require(self.new_project.is_file(), "new-project script does not exist")
         spec = importlib.util.spec_from_file_location("acceptance_new_project", self.new_project)
         require(spec is not None and spec.loader is not None, "cannot import new-project script")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         require(callable(getattr(module, "link_hush", None)), "new-project.py has no link_hush function")
-        return module.link_hush
+        return module
+
+    def new_project_main(self, slug, *, title="Acceptance project", vault_dir=None):
+        module = self.load_new_project()
+        code = self.root / "code space"
+        vault = self.root / "notes"
+        goals = vault / "compass" / "goals"
+        goals.mkdir(parents=True)
+        (goals / "acceptance-goal.md").write_text("# Temporary goal\n", encoding="utf-8")
+        repo = code / slug
+        t3 = self.root / "stub-t3.cmd"
+        calls = []
+
+        def run(args, cwd=None):
+            args = list(map(str, args))
+            calls.append(args)
+            if args[:2] in (["git", "init"], ["git", "add"]):
+                require(Path(cwd).resolve() == repo, "project creation escaped its temp repo")
+                self.git(*args[1:], cwd=repo)
+            elif args[:2] == ["git", "commit"]:
+                pass  # Keep the real index staged so the caller can inspect it.
+            elif args[:3] == [str(t3), "project", "add"]:
+                require(args[3] == repo.as_posix(), "T3 stub received the wrong repo")
+            else:
+                raise Failure("project creation attempted an unstubbed command")
+
+        argv = [str(self.new_project), slug, "--title", title, "--pitch", "Offline fixture",
+                "--goal", "acceptance-goal", "--no-github"]
+        if vault_dir:
+            argv += ["--vault-dir", vault_dir, "--area", "learning", "--tags", "offline,fixture"]
+        captured = io.StringIO()
+        with patch.multiple(module, CODE=code, VAULT=vault, GOALS=goals, T3=t3, run=run), \
+                patch.object(sys, "argv", argv), patch.dict(os.environ, self.env, clear=True), \
+                contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+            module.main()
+        self.no_values(captured.getvalue().encode(), "new-project main output")
+        require(any(c[:3] == [str(t3), "project", "add"] for c in calls), "T3 stub was not exercised")
+        staged = set(self.git("diff", "--cached", "--name-only", cwd=repo).stdout.decode().splitlines())
+        return repo, vault / (vault_dir or "projects/" + slug) / "project.md", staged
 
     def link_hush(self, slug, *, missing=False, path=None):
-        linker = self.load_linker()
+        linker = self.load_new_project().link_hush
         child_env = self.env.copy()
         if missing:
             empty = self.root / "empty-path"
@@ -303,6 +341,14 @@ class Sandbox:
         require(result.returncode != 77, "Windows console could not be allocated or driven")
         return result
 
+    def console_recovery_key(self):
+        result = self.command(
+            [sys.executable, Path(__file__).with_name("console_delete.py"), self.binary, "--recovery-key"],
+            console=True, env={"CLAUDECODE": "1"},
+        )
+        require(result.returncode != 77, "Windows recovery console could not be read")
+        return result
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -310,6 +356,9 @@ def main():
     parser.add_argument("--new-project", type=Path, default=Path("D:/code/setup/new-project.py"))
     parser.add_argument("--set", choices=("dev", "test"), default="dev")
     args = parser.parse_args()
+    binary_name = "hush.exe" if os.name == "nt" else "hush"
+    if args.hush and args.hush.name != binary_name:
+        parser.error("--hush binary must be named " + binary_name + " so PATH uses the same executable")
     # Alias prevents duplicate module globals when evals import this script.
     sys.modules["acceptance"] = sys.modules[__name__]
     for path in sorted((ROOT / "harness" / "evals" / args.set).glob("*.py")):
@@ -318,7 +367,7 @@ def main():
         spec.loader.exec_module(module)
     require(SCENARIOS, "no scenarios found")
     require(len({s[0] for s in SCENARIOS}) == len(SCENARIOS), "duplicate scenario id")
-    binary = args.hush.resolve() if args.hush else TARGET / "release" / "hush.exe"
+    binary = args.hush.resolve() if args.hush else TARGET / "release" / binary_name
     build_error = None
     if not args.hush:
         build_env = clean_environment()
@@ -351,7 +400,8 @@ def main():
                     try:
                         box.close()
                     except OSError:
-                        failure = "temporary sandbox cleanup failed"
+                        note = "temporary sandbox cleanup failed"
+                        failure = failure + "; " + note if failure else note
         if failure:
             print(f"FAIL {identifier}: point {point}: {failure}", flush=True)
         else:

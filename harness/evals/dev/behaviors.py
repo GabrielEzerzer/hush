@@ -69,6 +69,27 @@ def no_hush_on_path(s):
     require(s.vault_snapshot() == before and not s.project_names(), "missing hush changed the vault")
 
 
+@scenario("new-project-main-stages-the-hush-link-without-github", 2)
+def new_project_entrypoint(s):
+    s.setup()
+    repo, note, staged = s.new_project_main("offline-web")
+    require(s.project_names() == {"offline-web"}, "main did not create the hush vault project")
+    require({"README.md", "hush.toml", ".gitignore"} <= staged, "main did not stage both hush files")
+    require('project = "offline-web"' in (repo / "hush.toml").read_text(), "main linked the wrong project")
+    require(note.is_file() and "[[acceptance-goal]]" in note.read_text(), "main did not write the temp project note")
+
+
+@scenario("installed-hush-without-setup-returns-a-repair-hint", 2)
+def link_before_setup(s):
+    s.init_git()
+    require(not s.home.exists(), "uninitialized-vault precondition failed")
+    files, output = s.link_hush("setup-later")
+    require(files == [], "uninitialized hush returned files to commit")
+    require("hush setup" in output and "hush init setup-later" in output, "uninitialized hush did not explain recovery")
+    require(not (s.repo / "hush.toml").exists() and not (s.repo / ".gitignore").exists(), "uninitialized hush wrote partial plumbing")
+    require(not s.vault_snapshot(), "uninitialized link wrote vault files")
+
+
 @scenario("new-project-link-preserves-existing-ignore-rules", 2)
 def link_preserves_ignore(s):
     s.setup()
@@ -162,6 +183,27 @@ def agent_export(s):
         require(not result.stdout, "agent export wrote output")
 
 
+@scenario("agent-recovery-key-is-refused-in-a-real-console", 4)
+def agent_recovery_key(s):
+    s.setup()
+    before = s.vault_snapshot()
+    result = s.console_recovery_key()
+    require(result.returncode == 0 and result.stdout.strip() == b"RECOVERY_REFUSED_KEY_ABSENT",
+            "console recovery-key was not refused or exposed the key")
+    require(s.vault_snapshot() == before, "refused recovery-key changed the vault")
+
+
+@scenario("set-refuses-a-value-on-the-command-line", 4)
+def positional_value(s):
+    s.linked("stdin-only")
+    before = s.vault_snapshot()
+    # Public marker, not a generated secret: clap may echo rejected arguments.
+    result = s.hush("set", "CLI_TOKEN", "public-command-line-marker")
+    require(result.returncode != 0, "set accepted a positional value")
+    require(b"unexpected argument" in result.stderr, "positional value was not refused by argument parsing")
+    require(s.vault_snapshot() == before and s.ok(s.hush("list")).stdout == b"", "positional value modified the vault")
+
+
 @scenario("agent-allow-prod-cannot-start-an-app", 4)
 def agent_allow_prod(s):
     s.linked()
@@ -249,9 +291,13 @@ def worktree_shared(s):
     s.git("worktree", "add", "-q", "-b", "feature", worktree)
     require((worktree / ".git").is_file(), "fixture is not a real git worktree")
     s.app_run({"SHARED_TOKEN": value}, cwd=worktree)
+    descendant = worktree / "tools/deep"
+    descendant.mkdir(parents=True)
+    s.app_run({"SHARED_TOKEN": value}, cwd=descendant)
     updated = s.value()
     s.put("SHARED_TOKEN", updated, cwd=worktree)
     s.app_run({"SHARED_TOKEN": updated})
+    s.app_run({"SHARED_TOKEN": updated}, cwd=descendant)
     require(s.project_names() == {"shared-repo"}, "worktree created another project")
 
 
@@ -284,16 +330,20 @@ def native_without_services(s):
     baseline = hush_processes()
     s.setup()
     s.init_git()
-    # An empty support dir plus the binary is a deliberate PATH allowlist.
+    # Fixture precondition: this deliberate PATH allowlist cannot discover VM tools.
     minimal = str(s.binary.parent)
     for command in ("wsl", "wsl.exe", "docker", "docker.exe"):
-        require(shutil.which(command, path=minimal) is None, "VM/container tool exists on minimal PATH")
+        require(shutil.which(command, path=minimal) is None, "precondition: VM/container tool exists on minimal PATH")
     env = {"PATH": minimal}
     s.ok(s.hush("init", "native-project", env=env), "one-command native project link")
     value = s.value()
     s.ok(s.hush("set", "NATIVE_TOKEN", data=value.encode(), env=env), "native set")
     s.app_run({"NATIVE_TOKEN": value}, env=env)
     s.app_run({"NATIVE_TOKEN": value}, env=env, code=17)
+    descendant = s.repo / "native/child"
+    descendant.mkdir(parents=True)
+    s.app_run({"NATIVE_TOKEN": value}, cwd=descendant, env=env)
+    s.app_run({"NATIVE_TOKEN": value}, cwd=descendant, env=env, code=17)
     require(hush_processes() <= baseline, "a new hush process remains after commands returned")
 
 
