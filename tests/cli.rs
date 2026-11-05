@@ -403,7 +403,7 @@ fn names_are_validated_at_the_boundary() {
 #[test]
 fn production_environments_need_allow_prod_to_be_read() {
     let env = Env::with_project("demo");
-    for prod in ["prod", "production"] {
+    for prod in ["prod", "production", "prod-eu"] {
         env.set(&["-e", prod, "SECRET"], "live");
         env.hush(&["-e", prod, "get", "SECRET"])
             .fails()
@@ -543,6 +543,93 @@ fn a_bad_dotenv_file_imports_nothing() {
 }
 
 #[test]
+fn import_errors_never_show_values() {
+    let env = Env::with_project("demo");
+    let canary = "canary-7f3e1b";
+    for (body, line) in [
+        (format!("GOOD=1\nDB_PASSWORD=hunter2 {canary} words\n"), 2),
+        (format!("# note\n\nA=\"x\\q{canary}\"\n"), 3),
+        (format!("A=1\n{canary}\n"), 2),
+        (format!("A=1\nB=\"{canary}\nstill open\n"), 2),
+        (format!("1BAD={canary}\n"), 1),
+    ] {
+        let src = env.repo.path().join("bad.env");
+        fs::write(&src, &body).unwrap();
+        let r = env
+            .hush(&["import", src.to_str().unwrap()])
+            .fails()
+            .stderr_has(&format!("line {line} is not valid dotenv"));
+        assert!(
+            !r.stderr().contains(canary) && !r.stdout().contains(canary),
+            "value leaked for {body:?}: {}",
+            r.stderr()
+        );
+        assert!(!env.file("demo", "dev").exists());
+    }
+}
+
+#[test]
+fn import_refuses_unescaped_dollar_and_writes_nothing() {
+    let env = Env::with_project("demo");
+    let src = env.repo.path().join(".env");
+    for (body, line) in [
+        ("A=1\nURL=https://x/?t=${HUSH_KEY}\n", 2),
+        ("A=$HUSH_KEY\n", 1),
+        ("A=\"multi\nline $HUSH_KEY\"\n", 2),
+        ("A='ok $1'\nB=\"\\\\$HUSH_KEY\"\n", 2),
+    ] {
+        fs::write(&src, body).unwrap();
+        let r = env
+            .hush(&["import", src.to_str().unwrap()])
+            .fails()
+            .stderr_has(&format!("line {line} has an unescaped '$'"))
+            .stderr_has("single-quote the value or escape it as \\$");
+        assert!(!r.stderr().contains("8899aabb"), "{}", r.stderr());
+        assert!(!env.file("demo", "dev").exists(), "{body:?} wrote the vault");
+    }
+    // A '$' in a comment is never expanded, so it is allowed.
+    fs::write(&src, "# costs $5\nA=1 # see $HOME\n").unwrap();
+    env.hush(&["import", src.to_str().unwrap()])
+        .ok()
+        .stderr_has("Imported 1 secrets");
+}
+
+#[test]
+fn an_empty_value_on_stdin_changes_nothing() {
+    let env = Env::with_project("demo");
+    env.set(&["A"], "kept");
+    let before = fs::read(env.file("demo", "dev")).unwrap();
+    for input in ["", "\n", "\r\n"] {
+        env.hush_in(&["set", "A"], input).fails().stderr_has("no value");
+    }
+    assert_eq!(fs::read(env.file("demo", "dev")).unwrap(), before);
+    assert_eq!(env.get(&["A"]), "kept");
+}
+
+#[test]
+fn an_empty_hush_home_or_hush_key_is_an_error() {
+    let env = Env::with_project("demo");
+    for empty in ["", "   "] {
+        let mut c = env.cmd(KEY_A);
+        c.env("HUSH_HOME", empty);
+        env.run_with(c, &["list"], None)
+            .fails()
+            .stderr_has("HUSH_HOME is set but empty");
+        env.run_with(env.cmd(empty), &["list"], None)
+            .fails()
+            .stderr_has("HUSH_KEY is set but empty");
+    }
+}
+
+#[test]
+fn run_does_not_pass_the_vault_key_to_the_child() {
+    let env = Env::with_project("demo");
+    env.set(&["A"], "1");
+    let out = env.hush(&run_args(&print_var("HUSH_KEY"))).ok().stdout();
+    assert!(!out.contains("8899aabb"), "child saw HUSH_KEY: {out}");
+}
+
+#[test]
 fn concurrent_writers_lose_nothing() {
     let env = Env::with_project("demo");
     let children: Vec<_> = (0..16)
@@ -617,8 +704,9 @@ fn an_agent_shell_cannot_print_values_or_unlock_prod() {
 }
 
 fn value_strategy() -> impl Strategy<Value = String> {
-    // Any text without NUL. A value ending in CR loses it, since stdin input strips one CRLF.
-    "[^\u{0}]{0,40}".prop_filter("no trailing CR", |v| !v.ends_with('\r'))
+    // Any non-empty text without NUL (`set` refuses an empty value). A value ending in CR loses
+    // it, since stdin input strips one CRLF.
+    "[^\u{0}]{1,40}".prop_filter("no trailing CR", |v| !v.ends_with('\r'))
 }
 
 #[test]

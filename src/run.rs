@@ -13,7 +13,8 @@ pub fn run(command: &[OsString], secrets: &Secrets) -> Result<i32> {
     // Resolve through PATH (and PATHEXT on Windows) so `npm` finds npm.cmd.
     let resolved = which::which(prog).with_context(|| format!("command not found: {}", prog.to_string_lossy()))?;
     let mut cmd = Command::new(&resolved);
-    cmd.args(args).envs(secrets);
+    // The child never needs the vault key, and a program that logs its environment would leak it.
+    cmd.args(args).env_remove("HUSH_KEY").envs(secrets);
 
     #[cfg(unix)]
     {

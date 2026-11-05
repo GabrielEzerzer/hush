@@ -26,11 +26,15 @@ pub fn read(dir: &Path) -> Result<Option<ProjectFile>> {
     }
 }
 
-/// The nearest hush.toml in `start` or any folder above it.
+/// The nearest hush.toml in `start` or any folder above it, up to the repo root: the first folder
+/// holding `.git` (a folder, or a file in a worktree). A stray hush.toml above the repo is ignored.
 pub fn find(start: &Path) -> Result<Option<ProjectFile>> {
     for dir in start.ancestors() {
         if let Some(f) = read(dir)? {
             return Ok(Some(f));
+        }
+        if dir.join(".git").exists() {
+            break;
         }
     }
     Ok(None)
@@ -116,5 +120,26 @@ mod tests {
         let deep = dir.path().join("a").join("b");
         fs::create_dir_all(&deep).unwrap();
         assert_eq!(find(&deep).unwrap().unwrap().project, "ran-ai");
+    }
+
+    #[test]
+    fn find_stops_at_the_repo_root() {
+        for git_is_file in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            write(dir.path(), "stray").unwrap();
+            let repo = dir.path().join("repo");
+            let sub = repo.join("sub");
+            fs::create_dir_all(&sub).unwrap();
+            if git_is_file {
+                fs::write(repo.join(".git"), "gitdir: elsewhere\n").unwrap();
+            } else {
+                fs::create_dir(repo.join(".git")).unwrap();
+            }
+            assert!(find(&sub).unwrap().is_none(), "found the hush.toml above the repo");
+            write(&repo, "root").unwrap();
+            assert_eq!(find(&sub).unwrap().unwrap().project, "root");
+            write(&sub, "app").unwrap();
+            assert_eq!(find(&sub).unwrap().unwrap().project, "app");
+        }
     }
 }

@@ -27,7 +27,7 @@ hush import .env.local        # or move an existing .env file in, then delete th
 hush run -- npm run dev       # starts the app with the secrets in its environment
 ```
 
-Commit `hush.toml`. It only names the vault project (`project = "my-app"`), and it is how every checkout and worktree of the repo finds its secrets. Hush looks for it in the current folder and every folder above it.
+Commit `hush.toml`. It only names the vault project (`project = "my-app"`), and it is how every checkout and worktree of the repo finds its secrets. Hush looks for it in the current folder and every folder above it, up to the repo root (the first folder that holds `.git`), so a stray `hush.toml` above the repo is ignored.
 
 Point the app's scripts at `hush run` so nobody has to remember it:
 
@@ -38,7 +38,7 @@ Point the app's scripts at `hush run` so nobody has to remember it:
 }
 ```
 
-Any program works the same way: `hush run -- python main.py`, `hush run -- cargo run`, `hush run -- supabase start`. The app reads its secrets from environment variables as it already does. A value in the vault takes precedence over a variable of the same name already set in the shell. On Windows, `hush run` finds `.cmd` and `.bat` shims on `PATH`, so `npm`, `npx` and `pnpm` work by name.
+Any program works the same way: `hush run -- python main.py`, `hush run -- cargo run`, `hush run -- supabase start`. The app reads its secrets from environment variables as it already does. A value in the vault takes precedence over a variable of the same name already set in the shell. On Windows, `hush run` finds `.cmd` and `.bat` shims on `PATH`, so `npm`, `npx` and `pnpm` work by name. If `HUSH_KEY` is set in the shell, `hush run` removes it from the program's environment, since the program never needs the vault key.
 
 ## Commands
 
@@ -60,11 +60,13 @@ Any program works the same way: `hush run -- python main.py`, `hush run -- cargo
 
 Every command takes `-p/--project` (default: the project in `hush.toml`) and `-e/--env` (default: `dev`). `HUSH_PROJECT` and `HUSH_ENV` set the same things.
 
-To pipe a value in, for example from a script: `printf '%s' "$VALUE" | hush set NAME`. One trailing newline (or CRLF) is removed.
+To pipe a value in, for example from a script: `printf '%s' "$VALUE" | hush set NAME`. One trailing newline (or CRLF) is removed. An empty value is refused and the stored secret stays as it was.
+
+`hush import` refuses a file that holds a `$` outside single quotes, unless it is escaped as `\$` or sits in a comment. Dotenv parsers replace `$NAME` and `${NAME}` with variables from the environment, so such a file could copy `HUSH_KEY` or a shell token into a stored value. The error names the line; single-quote the value or escape the `$`, then import again. Nothing is written until the whole file passes. Parse errors name the file and line but never show the line's content, since it may hold a value.
 
 ## Environments
 
-Each project has as many environments as you need. `dev` is the default. Name the production one `prod` or `production`: hush refuses to read those (`get`, `export`, `run`) unless you pass `--allow-prod`, so a test or seed script can't pick up production credentials by accident. Listing names and storing values in them needs no flag.
+Each project has as many environments as you need. `dev` is the default. Give production environments a name that starts with `prod`, such as `prod`, `production` or `prod-eu`: hush refuses to read any environment whose name starts with `prod` (`get`, `export`, `run`) unless you pass `--allow-prod`, so a test or seed script can't pick up production credentials by accident. Listing names and storing values in them needs no flag.
 
 ## How secrets are protected
 
@@ -79,12 +81,13 @@ What hush does not protect against:
 - Malware running as your Windows user. It can ask the keychain for the key, as hush does.
 - The app itself. Once `hush run` starts a program, that program has the values in its environment and can print or log them, as it could with a `.env` file.
 - Anyone who reads the output of `hush get` or `hush export`.
+- Rollback or deletion of a file. Each environment file is checked on its own, so restoring an older copy of an environment file, or deleting it, is not detected. An older copy decrypts and its old values are used.
 
 ## Rules for AI agents
 
 When an agent runs a command, its output goes into the model's context and is sent to the model provider. So agents may use `hush init`, `hush list`, `hush import`, `hush run`, and `hush set` with the value piped in from a file the user provided, but they must never see a value.
 
-Hush enforces part of this itself. When `CLAUDECODE` is set, as it is in every shell Claude Code starts, hush refuses `get`, `export`, `recovery-key` and `--allow-prod`. This guards against accidents, not against an agent working around it: it can't stop `hush run` from starting a program that prints its environment.
+Hush enforces part of this itself. When `CLAUDECODE` is set, as it is in every shell Claude Code starts, hush refuses `get`, `export`, `recovery-key` and `--allow-prod`. This guards against accidents, not against an agent working around it: it can't stop `hush run` from starting a program that prints its environment. These rules depend on the agent cooperating. An agent's shell runs as your user, and any process running as your user can read the vault key from Credential Manager (macOS: Keychain) and decrypt the vault itself.
 
 ## A new machine
 

@@ -9,7 +9,7 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use zeroize::Zeroizing;
 
@@ -28,7 +28,7 @@ struct Cli {
     #[arg(short, long, global = true, env = "HUSH_ENV", default_value = "dev")]
     env: String,
 
-    /// Allow reading the prod or production environment
+    /// Allow reading an environment whose name starts with prod
     #[arg(long, global = true)]
     allow_prod: bool,
 
@@ -363,18 +363,26 @@ fn read_value(name: &str) -> Result<Zeroizing<String>> {
         .strip_suffix('\n')
         .map(|t| t.strip_suffix('\r').unwrap_or(t))
         .unwrap_or(text);
+    ensure!(!text.is_empty(), "no value on stdin; nothing stored");
     Ok(Zeroizing::new(text.to_owned()))
 }
 
 fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
     let (vault, project, env) = open(cli, home)?;
     let raw = Zeroizing::new(std::fs::read(file).with_context(|| format!("reading {}", file.display()))?);
+    let text = std::str::from_utf8(&raw).map_err(|_| anyhow!("{} is not UTF-8 text", file.display()))?;
     let mut pairs = Vec::new();
-    for item in dotenvy::from_read_iter(&raw[..]) {
-        let (k, v) = item.with_context(|| format!("parsing {}", file.display()))?;
-        check_secret_name(&k)?;
-        check_secret_value(&k, &v)?;
-        pairs.push((k, Zeroizing::new(v)));
+    for (line, entry) in dotenv_entries(file, text)? {
+        for item in dotenvy::from_read_iter(entry.as_bytes()) {
+            // dotenvy's error text quotes the whole line, value included, so it never reaches the user.
+            let Ok((k, v)) = item else {
+                bail!("{}: line {line} is not valid dotenv", file.display());
+            };
+            let v = Zeroizing::new(v);
+            check_secret_name(&k)?;
+            check_secret_value(&k, &v)?;
+            pairs.push((k, v));
+        }
     }
     let total = pairs.len();
     let replaced = vault.update(&project, &env, |s| {
@@ -387,11 +395,76 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
         "Imported {total} secrets into {project}/{env} ({} new, {replaced} replaced).",
         total - replaced
     );
-    if raw.contains(&b'$') {
-        eprintln!("The file contains '$'. dotenv expands $NAME references, so check those values with `hush get`.");
-    }
     eprintln!("Delete {} once the app starts through `hush run`.", file.display());
     Ok(())
+}
+
+/// Splits a dotenv file into entries that each start on a new line and end outside any quote,
+/// paired with the line each starts on. Refuses an unescaped `$` outside single quotes: dotenvy
+/// expands `$NAME` and `${NAME}` from hush's own environment, so a crafted file could copy
+/// HUSH_KEY or a shell token into a stored value.
+fn dotenv_entries<'a>(file: &std::path::Path, text: &'a str) -> Result<Vec<(usize, &'a str)>> {
+    #[derive(PartialEq)]
+    enum Quote {
+        None,
+        Double,
+        Single,
+    }
+    let (mut quote, mut escaped, mut comment, mut after_space) = (Quote::None, false, false, true);
+    let (mut line, mut start, mut start_line) = (1, 0, 1);
+    let mut out = Vec::new();
+    for (i, c) in text.char_indices() {
+        if c == '\n' {
+            if quote == Quote::None && !escaped {
+                out.push((start_line, &text[start..=i]));
+                (start, start_line, comment, after_space) = (i + 1, line + 1, false, true);
+            }
+            line += 1;
+            escaped = false;
+            continue;
+        }
+        if comment {
+            continue;
+        }
+        if escaped {
+            (escaped, after_space) = (false, false);
+            continue;
+        }
+        let dollar = match (&quote, c) {
+            (Quote::Single, '\'') | (Quote::Double, '"') => {
+                quote = Quote::None;
+                false
+            }
+            (Quote::Single, _) => false,
+            (Quote::None, '#') if after_space => {
+                comment = true;
+                false
+            }
+            (Quote::None, '\'') => {
+                quote = Quote::Single;
+                false
+            }
+            (Quote::None, '"') => {
+                quote = Quote::Double;
+                false
+            }
+            (_, '\\') => {
+                escaped = true;
+                false
+            }
+            (_, c) => c == '$',
+        };
+        ensure!(
+            !dollar,
+            "{}: line {line} has an unescaped '$', which dotenv would replace with a variable from the environment; single-quote the value or escape it as \\$. Nothing was imported.",
+            file.display()
+        );
+        after_space = quote == Quote::None && c != '\r' && c.is_whitespace();
+    }
+    if start < text.len() {
+        out.push((start_line, &text[start..]));
+    }
+    Ok(out)
 }
 
 /// One dotenv line that dotenvy reads back as the same value.

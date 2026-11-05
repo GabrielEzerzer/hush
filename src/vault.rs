@@ -33,9 +33,21 @@ struct Meta {
 }
 
 pub fn home() -> Result<PathBuf> {
-    match std::env::var_os("HUSH_HOME") {
-        Some(p) if !p.is_empty() => Ok(PathBuf::from(p)),
-        _ => Ok(dirs::data_dir()
+    home_from(std::env::var_os("HUSH_HOME"))
+}
+
+/// A set but empty HUSH_HOME is an error, not a fallback: falling back would point a test or CI
+/// run whose variable expanded to nothing at the real vault.
+fn home_from(var: Option<std::ffi::OsString>) -> Result<PathBuf> {
+    match var {
+        Some(p) => {
+            ensure!(
+                !p.to_string_lossy().trim().is_empty(),
+                "HUSH_HOME is set but empty; unset it or point it at the vault folder"
+            );
+            Ok(PathBuf::from(p))
+        }
+        None => Ok(dirs::data_dir()
             .context("cannot find the user data folder; set HUSH_HOME")?
             .join("hush")),
     }
@@ -66,12 +78,18 @@ pub fn require_vault(home: &Path) -> Result<()> {
 }
 
 fn env_key() -> Result<Option<MasterKey>> {
-    match std::env::var("HUSH_KEY") {
+    key_from(std::env::var("HUSH_KEY"))
+}
+
+/// A set but empty HUSH_KEY is an error, not a fallback to the OS keychain.
+fn key_from(var: Result<String, std::env::VarError>) -> Result<Option<MasterKey>> {
+    match var {
         Ok(s) => {
             let s = Zeroizing::new(s);
-            if s.trim().is_empty() {
-                return Ok(None);
-            }
+            ensure!(
+                !s.trim().is_empty(),
+                "HUSH_KEY is set but empty; unset it to use the OS keychain, or set it to the vault key"
+            );
             Ok(Some(
                 crypto::decode_key(&s).context("HUSH_KEY is not a valid hush key")?,
             ))
@@ -141,6 +159,7 @@ pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> 
                     "the vault at {} exists but its key is not in the OS keychain; run `hush setup --recover` with your recovery key",
                     home.display()
                 );
+                refuse_orphaned_files(home)?;
                 let k = crypto::new_key();
                 keychain::store(&k)?;
                 new_key = true;
@@ -168,12 +187,58 @@ pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> 
         version: FORMAT,
         key_id: crypto::key_id(&key),
     })?;
-    fs::write(home.join("vault.toml"), meta).context("writing vault.toml")?;
+    write_new_meta(home, &meta)?;
     Ok(SetupOutcome {
         created_vault: true,
         new_key,
         key_from_env,
     })
+}
+
+/// Minting a new key next to encrypted files would lock the user out of them: vault.toml is
+/// missing (a partial copy, say) but the secrets are there, and their key is elsewhere.
+fn refuse_orphaned_files(home: &Path) -> Result<()> {
+    let projects = home.join("projects");
+    let entries = match fs::read_dir(&projects) {
+        Ok(e) => e,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", projects.display())),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        for f in fs::read_dir(entry.path())? {
+            if f?.path().extension().is_some_and(|x| x == "hush") {
+                bail!(
+                    "{} holds encrypted secrets but vault.toml is missing; restore vault.toml from your copy of the vault, or run `hush setup --recover` with your recovery key",
+                    projects.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Writes vault.toml through a temporary file that is moved into place only if no vault.toml
+/// exists, so a crash never leaves a partial file and a concurrent setup never overwrites one.
+fn write_new_meta(home: &Path, meta: &str) -> Result<()> {
+    let path = home.join("vault.toml");
+    let mut tmp = NamedTempFile::new_in(home).context("creating a temporary file in the vault")?;
+    tmp.write_all(meta.as_bytes())?;
+    tmp.as_file().sync_all()?;
+    tmp.persist_noclobber(&path).map_err(|e| {
+        if e.error.kind() == ErrorKind::AlreadyExists {
+            anyhow::anyhow!(
+                "{} appeared while hush setup was running; run `hush setup` again to check it",
+                path.display()
+            )
+        } else {
+            anyhow::Error::new(e.error).context(format!("writing {}", path.display()))
+        }
+    })?;
+    Ok(())
 }
 
 fn project_dir(home: &Path, project: &str) -> Result<PathBuf> {
@@ -283,8 +348,9 @@ impl Vault {
         let plain = crypto::open(&self.key, &Self::aad(project, env), &data)
             .with_context(|| format!("reading {}", file.display()))?;
         // shortcut: values are zeroized only in the decrypted buffer, not in the map's Strings; upgrade if a threat model includes memory dumps.
+        // serde_json's error can quote the offending value, so only the file name is reported.
         let secrets =
-            serde_json::from_slice(&plain).with_context(|| format!("{} holds invalid data", file.display()))?;
+            serde_json::from_slice(&plain).map_err(|_| anyhow::anyhow!("{} holds invalid data", file.display()))?;
         Ok(Some(secrets))
     }
 
@@ -314,6 +380,50 @@ impl Vault {
             .with_context(|| format!("replacing {}", file.display()))?;
         drop(lock);
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_hush_home_or_hush_key_is_an_error() {
+        for empty in ["", "  ", "\t"] {
+            let e = home_from(Some(empty.into())).unwrap_err();
+            assert!(e.to_string().contains("HUSH_HOME"), "{e}");
+            let e = key_from(Ok(empty.into())).err().unwrap();
+            assert!(e.to_string().contains("HUSH_KEY"), "{e}");
+        }
+        assert_eq!(home_from(Some("x".into())).unwrap(), PathBuf::from("x"));
+        assert!(key_from(Err(std::env::VarError::NotPresent)).unwrap().is_none());
+        assert!(key_from(Ok("00".repeat(32))).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_new_key_is_refused_next_to_existing_secrets() {
+        let home = tempfile::tempdir().unwrap();
+        refuse_orphaned_files(home.path()).unwrap();
+        let project = home.path().join("projects").join("demo");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join(".lock"), "").unwrap();
+        refuse_orphaned_files(home.path()).unwrap();
+        fs::write(project.join("dev.hush"), "x").unwrap();
+        let e = refuse_orphaned_files(home.path()).unwrap_err().to_string();
+        assert!(e.contains("vault.toml") && e.contains("--recover"), "{e}");
+    }
+
+    #[test]
+    fn vault_toml_is_never_overwritten() {
+        let home = tempfile::tempdir().unwrap();
+        write_new_meta(home.path(), "first").unwrap();
+        assert!(write_new_meta(home.path(), "second").is_err());
+        assert_eq!(fs::read_to_string(home.path().join("vault.toml")).unwrap(), "first");
+        assert_eq!(
+            fs::read_dir(home.path()).unwrap().count(),
+            1,
+            "temporary file left behind"
+        );
     }
 }
 

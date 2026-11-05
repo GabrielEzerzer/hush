@@ -47,9 +47,9 @@ pub fn check_secret_value(name: &str, v: &str) -> Result<()> {
     Ok(())
 }
 
-/// Environments that hold production secrets need --allow-prod to be read.
+/// Environments that hold production secrets, any name starting with `prod`, need --allow-prod to be read.
 pub fn is_prod(env: &str) -> bool {
-    matches!(env, "prod" | "production")
+    env.starts_with("prod")
 }
 
 #[cfg(test)]
@@ -77,6 +77,16 @@ mod tests {
         }
         for bad in ["", "1A", "A-B", "A B", "A=B", "A.B", "É"] {
             assert!(check_secret_name(bad).is_err(), "{bad:?} accepted");
+        }
+    }
+
+    #[test]
+    fn every_prod_prefixed_environment_is_gated() {
+        for env in ["prod", "production", "prod-eu", "prod2", "prod_old"] {
+            assert!(is_prod(env), "{env} not gated");
+        }
+        for env in ["dev", "staging", "test", "preprod"] {
+            assert!(!is_prod(env), "{env} gated");
         }
     }
 }
