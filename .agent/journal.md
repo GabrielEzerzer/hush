@@ -50,7 +50,15 @@ Second workstream: D:/code (code-layer repo) for new-project + CLAUDE.md + hook 
 - code-layer hush-routing: review round 1 → 6 fixes; round 2 → link_hush trusted exit 0 without files (fixed),
   timeout, hints, ship pipe caveat. Merge order: hush v1 before hush-routing.
 
+- Fix lane 3 (Opus worker) 61131e4: piped `get` prints no trailing newline. Gates: 14 unit + 31 e2e green.
+
+### Review round 2 (2026-11-05)
+- Final reviewer (Opus, correctness + security): CHANGES REQUESTED, no blockers; all 12 round-1 items VERIFIED.
+  Should-fix: import $ guard is a second parser that must match dotenvy (fix: clear process env before parsing);
+  UTF-8 BOM import refused; setup prints the recovery key without the agent check. Nits: init takes HUSH_PROJECT
+  from env; orphaned-files check only on the key-minting path.
+- Fix lane 4 (Opus worker): all five, running.
+
 ## Open
-- Lane 3: `get` without trailing newline when piped (for `hush get | vercel env add`).
-- Final review round on the whole diff (Opus, correctness + security), then sol-loop on the final diff.
+- Lane 4 result, then re-review of the lane 4 diff, then sol-loop on the final diff.
 - Move this journal into the PR description and delete .agent/ before Ready.
