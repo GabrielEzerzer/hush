@@ -49,7 +49,11 @@ fn read_meta(home: &Path) -> Result<Option<Meta>> {
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
     let meta: Meta = toml::from_str(&text).with_context(|| format!("{} is not valid", path.display()))?;
-    ensure!(meta.version == FORMAT, "the vault uses format {}, which this hush does not know; update hush", meta.version);
+    ensure!(
+        meta.version == FORMAT,
+        "the vault uses format {}, which this hush does not know; update hush",
+        meta.version
+    );
     Ok(Some(meta))
 }
 
@@ -68,7 +72,9 @@ fn env_key() -> Result<Option<MasterKey>> {
             if s.trim().is_empty() {
                 return Ok(None);
             }
-            Ok(Some(crypto::decode_key(&s).context("HUSH_KEY is not a valid hush key")?))
+            Ok(Some(
+                crypto::decode_key(&s).context("HUSH_KEY is not a valid hush key")?,
+            ))
         }
         Err(std::env::VarError::NotPresent) => Ok(None),
         Err(std::env::VarError::NotUnicode(_)) => bail!("HUSH_KEY is not valid text"),
@@ -101,20 +107,30 @@ pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> 
     let mut new_key = false;
     let key_from_env;
     let key = if let Some(k) = env_key()? {
-        ensure!(recovered.is_none(), "HUSH_KEY is set; unset it to restore a key into the OS keychain");
+        ensure!(
+            recovered.is_none(),
+            "HUSH_KEY is set; unset it to restore a key into the OS keychain"
+        );
         key_from_env = true;
         k
     } else {
         key_from_env = false;
         match (keychain::load()?, recovered) {
             (Some(existing), Some(r)) => {
-                ensure!(existing[..] == r[..], "the OS keychain already holds a different hush key; hush will not overwrite it");
+                ensure!(
+                    existing[..] == r[..],
+                    "the OS keychain already holds a different hush key; hush will not overwrite it"
+                );
                 existing
             }
             (Some(existing), None) => existing,
             (None, Some(r)) => {
                 if let Some(m) = &meta {
-                    ensure!(crypto::key_id(&r) == m.key_id, "that recovery key does not match the vault at {}", home.display());
+                    ensure!(
+                        crypto::key_id(&r) == m.key_id,
+                        "that recovery key does not match the vault at {}",
+                        home.display()
+                    );
                 }
                 keychain::store(&r)?;
                 r
@@ -141,12 +157,23 @@ pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> 
             crypto::key_id(&key),
             m.key_id
         );
-        return Ok(SetupOutcome { created_vault: false, new_key, key_from_env });
+        return Ok(SetupOutcome {
+            created_vault: false,
+            new_key,
+            key_from_env,
+        });
     }
     create_private_dir(&home.join("projects"))?;
-    let meta = toml::to_string(&Meta { version: FORMAT, key_id: crypto::key_id(&key) })?;
+    let meta = toml::to_string(&Meta {
+        version: FORMAT,
+        key_id: crypto::key_id(&key),
+    })?;
     fs::write(home.join("vault.toml"), meta).context("writing vault.toml")?;
-    Ok(SetupOutcome { created_vault: true, new_key, key_from_env })
+    Ok(SetupOutcome {
+        created_vault: true,
+        new_key,
+        key_from_env,
+    })
 }
 
 fn project_dir(home: &Path, project: &str) -> Result<PathBuf> {
@@ -256,7 +283,8 @@ impl Vault {
         let plain = crypto::open(&self.key, &Self::aad(project, env), &data)
             .with_context(|| format!("reading {}", file.display()))?;
         // shortcut: values are zeroized only in the decrypted buffer, not in the map's Strings; upgrade if a threat model includes memory dumps.
-        let secrets = serde_json::from_slice(&plain).with_context(|| format!("{} holds invalid data", file.display()))?;
+        let secrets =
+            serde_json::from_slice(&plain).with_context(|| format!("{} holds invalid data", file.display()))?;
         Ok(Some(secrets))
     }
 
@@ -281,7 +309,9 @@ impl Vault {
         let mut tmp = NamedTempFile::new_in(&dir).context("creating a temporary file in the vault")?;
         tmp.write_all(&sealed)?;
         tmp.as_file().sync_all()?;
-        tmp.persist(&file).map_err(|e| e.error).with_context(|| format!("replacing {}", file.display()))?;
+        tmp.persist(&file)
+            .map_err(|e| e.error)
+            .with_context(|| format!("replacing {}", file.display()))?;
         drop(lock);
         Ok(out)
     }
@@ -302,7 +332,9 @@ mod keychain {
         match entry()?.get_password() {
             Ok(s) => {
                 let s = Zeroizing::new(s);
-                Ok(Some(crypto::decode_key(&s).context("the hush key in the OS keychain is corrupt")?))
+                Ok(Some(
+                    crypto::decode_key(&s).context("the hush key in the OS keychain is corrupt")?,
+                ))
             }
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e).context("reading the hush key from the OS keychain"),
@@ -315,7 +347,10 @@ mod keychain {
             .context("saving the hush key to the OS keychain")?;
         // Read it back: a keychain that accepts the key but cannot return it would lose every secret.
         let back = load()?.context("the OS keychain did not keep the hush key")?;
-        ensure!(back[..] == key[..], "the OS keychain returned a different key than the one saved");
+        ensure!(
+            back[..] == key[..],
+            "the OS keychain returned a different key than the one saved"
+        );
         Ok(())
     }
 }

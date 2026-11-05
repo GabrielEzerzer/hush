@@ -23,3 +23,12 @@ Second workstream: D:/code (code-layer repo) for new-project + CLAUDE.md + hook 
 - Not built: GUI, sync/sharing with David, cloud backends, Vercel push. Named in the summary.
 
 ## Rounds
+### Build (2026-11-05)
+- Gates: 8 unit + 21 end-to-end tests green (incl. two proptest properties: set/get and export/import
+  round-trip of arbitrary text, CR included); clippy -D warnings clean; fmt clean.
+- Mutation check, each red as expected: no project lock (concurrency test), no AAD binding (swap test),
+  no prod gate, plaintext written to disk, no `$` escape in export (property), no key-id check,
+  write after a failed read. (argv-value mutation needed a two-site edit; covered by clap rejecting the arg.)
+- Real keychain smoke (temp HUSH_HOME, no HUSH_KEY): setup stores + reads back from Windows Credential
+  Manager, init/set work, re-setup verifies, setup after vault removal reuses the key; test credential
+  deleted afterwards with cmdkey. Found and fixed: reused-key setup didn't show the recovery reminder.

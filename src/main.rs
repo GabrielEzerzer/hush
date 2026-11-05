@@ -124,7 +124,11 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
                 eprintln!("No projects yet. Run `hush init` in a repo to create one.");
             }
             for (name, envs) in projects {
-                let envs = if envs.is_empty() { "no secrets yet".to_owned() } else { envs.join(", ") };
+                let envs = if envs.is_empty() {
+                    "no secrets yet".to_owned()
+                } else {
+                    envs.join(", ")
+                };
                 println!("{name}  ({envs})");
             }
         }
@@ -137,7 +141,10 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         }
         Cmd::Project(ProjectCmd::Delete { ref name }) => {
             ensure!(vault::project_exists(&home, name)?, "no project '{name}' in the vault");
-            ensure!(io::stdin().is_terminal(), "deleting a project needs an interactive terminal");
+            ensure!(
+                io::stdin().is_terminal(),
+                "deleting a project needs an interactive terminal"
+            );
             eprint!("This deletes project {name} and every secret in it. Type the project name to confirm: ");
             let mut typed = String::new();
             io::stdin().read_line(&mut typed)?;
@@ -150,13 +157,20 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             check_secret_name(name)?;
             let value = read_value(name)?;
             check_secret_value(name, &value)?;
-            let replaced = vault.update(&project, &env, |s| Ok(s.insert(name.clone(), value.to_string()).is_some()))?;
-            eprintln!("{} {name} in {project}/{env}.", if replaced { "Updated" } else { "Stored" });
+            let replaced = vault.update(&project, &env, |s| {
+                Ok(s.insert(name.clone(), value.to_string()).is_some())
+            })?;
+            eprintln!(
+                "{} {name} in {project}/{env}.",
+                if replaced { "Updated" } else { "Stored" }
+            );
         }
         Cmd::Get { ref name } => {
             let (vault, project, env) = open_for_reading(&cli, home)?;
             let secrets = vault.read(&project, &env)?.unwrap_or_default();
-            let value = secrets.get(name).with_context(|| format!("no secret {name} in {project}/{env}"))?;
+            let value = secrets
+                .get(name)
+                .with_context(|| format!("no secret {name} in {project}/{env}"))?;
             println!("{value}");
         }
         Cmd::List => {
@@ -172,7 +186,9 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         Cmd::Rm { ref name } => {
             let (vault, project, env) = open(&cli, home)?;
             vault.update(&project, &env, |s| {
-                s.remove(name).map(drop).with_context(|| format!("no secret {name} in {project}/{env}"))
+                s.remove(name)
+                    .map(drop)
+                    .with_context(|| format!("no secret {name} in {project}/{env}"))
             })?;
             eprintln!("Removed {name} from {project}/{env}.");
         }
@@ -233,23 +249,35 @@ fn open_for_reading(cli: &Cli, home: PathBuf) -> Result<(Vault, String, String)>
 
 fn setup(home: PathBuf, recover: bool) -> Result<()> {
     let recovered = if recover {
-        ensure!(io::stdin().is_terminal(), "--recover reads the key from a hidden prompt; run it in a terminal");
+        ensure!(
+            io::stdin().is_terminal(),
+            "--recover reads the key from a hidden prompt; run it in a terminal"
+        );
         let typed = Zeroizing::new(rpassword::prompt_password("Recovery key: ")?);
         Some(crypto::decode_key(&typed)?)
     } else {
         None
     };
     let out = vault::setup(&home, recovered)?;
-    let source = if out.key_from_env { "HUSH_KEY" } else { "the OS keychain" };
+    let source = if out.key_from_env {
+        "HUSH_KEY"
+    } else {
+        "the OS keychain"
+    };
     if out.created_vault {
         eprintln!("Created the vault at {}, with its key in {source}.", home.display());
     } else {
-        eprintln!("The vault at {} is set up and its key in {source} matches.", home.display());
+        eprintln!(
+            "The vault at {} is set up and its key in {source} matches.",
+            home.display()
+        );
     }
-    if out.new_key {
+    if (out.new_key || out.created_vault) && !out.key_from_env {
         if io::stdin().is_terminal() && io::stdout().is_terminal() {
             let vault = Vault::open(home)?;
-            eprintln!("\nRecovery key. Save it in your password manager now. Without it, a lost keychain means lost secrets:\n");
+            eprintln!(
+                "\nRecovery key. Save it in your password manager now. Without it, a lost keychain means lost secrets:\n"
+            );
             println!("    {}\n", *crypto::encode_key(vault.key()));
         } else {
             eprintln!(
@@ -298,9 +326,14 @@ fn read_value(name: &str) -> Result<Zeroizing<String>> {
         return Ok(value);
     }
     let mut buf = Zeroizing::new(Vec::new());
-    io::stdin().read_to_end(&mut buf).context("reading the value from stdin")?;
+    io::stdin()
+        .read_to_end(&mut buf)
+        .context("reading the value from stdin")?;
     let text = std::str::from_utf8(&buf).context("the value must be UTF-8 text")?;
-    let text = text.strip_suffix('\n').map(|t| t.strip_suffix('\r').unwrap_or(t)).unwrap_or(text);
+    let text = text
+        .strip_suffix('\n')
+        .map(|t| t.strip_suffix('\r').unwrap_or(t))
+        .unwrap_or(text);
     Ok(Zeroizing::new(text.to_owned()))
 }
 
@@ -316,7 +349,10 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
     }
     let total = pairs.len();
     let replaced = vault.update(&project, &env, |s| {
-        Ok(pairs.into_iter().filter(|(k, v)| s.insert(k.clone(), v.to_string()).is_some()).count())
+        Ok(pairs
+            .into_iter()
+            .filter(|(k, v)| s.insert(k.clone(), v.to_string()).is_some())
+            .count())
     })?;
     eprintln!(
         "Imported {total} secrets into {project}/{env} ({} new, {replaced} replaced).",

@@ -18,7 +18,9 @@ pub struct ProjectFile {
 pub fn read(dir: &Path) -> Result<Option<ProjectFile>> {
     let path = dir.join(FILE);
     match fs::read_to_string(&path) {
-        Ok(text) => Ok(Some(toml::from_str(&text).with_context(|| format!("{} is not valid", path.display()))?)),
+        Ok(text) => Ok(Some(
+            toml::from_str(&text).with_context(|| format!("{} is not valid", path.display()))?,
+        )),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
     }
@@ -37,14 +39,18 @@ pub fn find(start: &Path) -> Result<Option<ProjectFile>> {
 pub fn write(dir: &Path, project: &str) -> Result<()> {
     let body = format!(
         "# This repo's secrets live in the hush vault under this project name, not in the repo.\n{}",
-        toml::to_string(&ProjectFile { project: project.to_owned() })?
+        toml::to_string(&ProjectFile {
+            project: project.to_owned()
+        })?
     );
     fs::write(dir.join(FILE), body).context("writing hush.toml")
 }
 
 fn git(dir: &Path, args: &[&str]) -> Option<PathBuf> {
     let out = Command::new("git").args(args).current_dir(dir).output().ok()?;
-    out.status.success().then(|| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
+    out.status
+        .success()
+        .then(|| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
 }
 
 /// The repo's top folder, or `cwd` outside a git repo.
@@ -58,7 +64,9 @@ pub fn default_name(root: &Path) -> String {
     let main = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .and_then(|common| common.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| root.to_path_buf());
-    main.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default()
+    main.file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 const IGNORE_MARKER: &str = "# hush:";
@@ -76,7 +84,11 @@ pub fn ignore_env_files(root: &Path) -> Result<bool> {
     if current.lines().any(|l| l.starts_with(IGNORE_MARKER)) {
         return Ok(false);
     }
-    let sep = if current.is_empty() || current.ends_with('\n') { "" } else { "\n" };
+    let sep = if current.is_empty() || current.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
     let gap = if current.is_empty() { "" } else { "\n" };
     fs::write(&path, format!("{current}{sep}{gap}{IGNORE_BLOCK}")).context("writing .gitignore")?;
     Ok(true)

@@ -27,7 +27,13 @@ pub fn seal(key: &MasterKey, aad: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
     let cipher = XChaCha20Poly1305::new(key[..].into());
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
     let ct = cipher
-        .encrypt(&nonce, Payload { msg: plaintext, aad: aad.as_bytes() })
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: plaintext,
+                aad: aad.as_bytes(),
+            },
+        )
         .map_err(|_| anyhow::anyhow!("encryption failed"))?;
     let mut out = Vec::with_capacity(MAGIC.len() + NONCE_LEN + ct.len());
     out.extend_from_slice(MAGIC);
@@ -43,9 +49,17 @@ pub fn open(key: &MasterKey, aad: &str, data: &[u8]) -> Result<Zeroizing<Vec<u8>
     );
     let (nonce, ct) = data[MAGIC.len()..].split_at(NONCE_LEN);
     let cipher = XChaCha20Poly1305::new(key[..].into());
-    match cipher.decrypt(XNonce::from_slice(nonce), Payload { msg: ct, aad: aad.as_bytes() }) {
+    match cipher.decrypt(
+        XNonce::from_slice(nonce),
+        Payload {
+            msg: ct,
+            aad: aad.as_bytes(),
+        },
+    ) {
         Ok(pt) => Ok(Zeroizing::new(pt)),
-        Err(_) => bail!("cannot decrypt: the file was modified, moved from another project or environment, or the key is wrong"),
+        Err(_) => bail!(
+            "cannot decrypt: the file was modified, moved from another project or environment, or the key is wrong"
+        ),
     }
 }
 
@@ -67,7 +81,9 @@ pub fn encode_key(key: &MasterKey) -> Zeroizing<String> {
 
 pub fn decode_key(s: &str) -> Result<MasterKey> {
     let compact = Zeroizing::new(
-        s.chars().filter(|c| !c.is_whitespace() && *c != '-').collect::<String>(),
+        s.chars()
+            .filter(|c| !c.is_whitespace() && *c != '-')
+            .collect::<String>(),
     );
     let mut key = Zeroizing::new([0u8; KEY_LEN]);
     hex::decode_to_slice(compact.as_bytes(), &mut key[..])
@@ -102,7 +118,10 @@ mod tests {
         for i in 0..sealed.len() {
             let mut bad = sealed.clone();
             bad[i] ^= 1;
-            assert!(open(&k, "hush/v1/a/dev", &bad).is_err(), "flip at byte {i} went undetected");
+            assert!(
+                open(&k, "hush/v1/a/dev", &bad).is_err(),
+                "flip at byte {i} went undetected"
+            );
         }
         assert!(open(&k, "hush/v1/a/dev", &sealed[..sealed.len() - 1]).is_err());
     }

@@ -24,11 +24,20 @@ struct Run {
 
 impl Run {
     fn ok(self) -> Self {
-        assert!(self.out.status.success(), "expected success, got {:?}\nstderr: {}", self.out.status, self.stderr());
+        assert!(
+            self.out.status.success(),
+            "expected success, got {:?}\nstderr: {}",
+            self.out.status,
+            self.stderr()
+        );
         self
     }
     fn fails(self) -> Self {
-        assert!(!self.out.status.success(), "expected failure\nstdout: {}", self.stdout());
+        assert!(
+            !self.out.status.success(),
+            "expected failure\nstdout: {}",
+            self.stdout()
+        );
         self
     }
     fn stdout(&self) -> String {
@@ -38,14 +47,21 @@ impl Run {
         String::from_utf8_lossy(&self.out.stderr).into_owned()
     }
     fn stderr_has(self, needle: &str) -> Self {
-        assert!(self.stderr().contains(needle), "stderr lacks {needle:?}: {}", self.stderr());
+        assert!(
+            self.stderr().contains(needle),
+            "stderr lacks {needle:?}: {}",
+            self.stderr()
+        );
         self
     }
 }
 
 impl Env {
     fn new() -> Env {
-        let env = Env { home: TempDir::new().unwrap(), repo: TempDir::new().unwrap() };
+        let env = Env {
+            home: TempDir::new().unwrap(),
+            repo: TempDir::new().unwrap(),
+        };
         env.hush(&["setup"]).ok();
         env
     }
@@ -67,7 +83,10 @@ impl Env {
     }
 
     fn run_with(&self, mut c: Command, args: &[&str], stdin: Option<&[u8]>) -> Run {
-        c.args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::piped());
+        c.args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped());
         let mut child = c.spawn().unwrap();
         {
             use std::io::Write;
@@ -76,7 +95,9 @@ impl Env {
                 pipe.write_all(input).unwrap();
             }
         }
-        Run { out: child.wait_with_output().unwrap() }
+        Run {
+            out: child.wait_with_output().unwrap(),
+        }
     }
 
     fn hush(&self, args: &[&str]) -> Run {
@@ -101,7 +122,11 @@ impl Env {
     }
 
     fn file(&self, project: &str, env: &str) -> PathBuf {
-        self.home.path().join("projects").join(project).join(format!("{env}.hush"))
+        self.home
+            .path()
+            .join("projects")
+            .join(project)
+            .join(format!("{env}.hush"))
     }
 
     fn json(&self, env: &str) -> BTreeMap<String, String> {
@@ -130,13 +155,20 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
 fn setup_is_idempotent_and_rejects_a_different_key() {
     let env = Env::new();
     env.hush(&["setup"]).ok().stderr_has("matches");
-    env.run_with(env.cmd(KEY_B), &["setup"], None).fails().stderr_has("does not match");
-    env.run_with(env.cmd("not-a-key"), &["setup"], None).fails().stderr_has("HUSH_KEY");
+    env.run_with(env.cmd(KEY_B), &["setup"], None)
+        .fails()
+        .stderr_has("does not match");
+    env.run_with(env.cmd("not-a-key"), &["setup"], None)
+        .fails()
+        .stderr_has("HUSH_KEY");
 }
 
 #[test]
 fn commands_before_setup_point_to_setup() {
-    let env = Env { home: TempDir::new().unwrap(), repo: TempDir::new().unwrap() };
+    let env = Env {
+        home: TempDir::new().unwrap(),
+        repo: TempDir::new().unwrap(),
+    };
     env.hush(&["init", "demo"]).fails().stderr_has("hush setup");
     env.hush(&["-p", "demo", "list"]).fails().stderr_has("hush setup");
 }
@@ -147,8 +179,16 @@ fn init_links_the_repo_and_creates_the_project() {
     let toml = fs::read_to_string(env.repo.path().join("hush.toml")).unwrap();
     assert!(toml.contains("project = \"demo\""), "{toml}");
     let ignore = fs::read_to_string(env.repo.path().join(".gitignore")).unwrap();
-    assert!(ignore.contains(".env.*") && ignore.contains("!.env.example"), "{ignore}");
-    assert!(env.hush(&["project", "list"]).ok().stdout().contains("demo  (no secrets yet)"));
+    assert!(
+        ignore.contains(".env.*") && ignore.contains("!.env.example"),
+        "{ignore}"
+    );
+    assert!(
+        env.hush(&["project", "list"])
+            .ok()
+            .stdout()
+            .contains("demo  (no secrets yet)")
+    );
 
     env.hush(&["init"]).ok().stderr_has("Linked to existing project demo");
     env.hush(&["init", "other"]).fails().stderr_has("already links");
@@ -167,7 +207,9 @@ fn init_links_the_repo_and_creates_the_project() {
 fn set_get_list_rm() {
     let env = Env::with_project("demo");
     env.set(&["API_KEY"], "first");
-    env.hush_in(&["set", "API_KEY"], "second\n").ok().stderr_has("Updated API_KEY");
+    env.hush_in(&["set", "API_KEY"], "second\n")
+        .ok()
+        .stderr_has("Updated API_KEY");
     env.set(&["DB_URL"], "postgres://localhost/x");
     assert_eq!(env.get(&["API_KEY"]), "second");
 
@@ -176,7 +218,9 @@ fn set_get_list_rm() {
     assert!(!listed.contains("second"));
 
     env.hush(&["rm", "API_KEY"]).ok();
-    env.hush(&["get", "API_KEY"]).fails().stderr_has("no secret API_KEY in demo/dev");
+    env.hush(&["get", "API_KEY"])
+        .fails()
+        .stderr_has("no secret API_KEY in demo/dev");
     env.hush(&["rm", "API_KEY"]).fails();
     assert_eq!(env.hush(&["ls"]).ok().stdout(), "DB_URL\n");
     assert!(env.hush(&["project", "list"]).ok().stdout().contains("demo  (dev)"));
@@ -211,11 +255,25 @@ fn plaintext_never_reaches_the_disk() {
     assert!(files.len() >= 4, "{files:?}");
     for f in files {
         let bytes = fs::read(&f).unwrap();
-        for needle in ["canary-value-8c1f2e", "imported-value-77d1", "prod-value-a91c", "CANARY_NAME_ZQX", "IMPORTED_NAME_ZQX", "PROD_NAME_ZQX"] {
-            assert!(!contains(&bytes, needle.as_bytes()), "{needle} found in plaintext in {}", f.display());
+        for needle in [
+            "canary-value-8c1f2e",
+            "imported-value-77d1",
+            "prod-value-a91c",
+            "CANARY_NAME_ZQX",
+            "IMPORTED_NAME_ZQX",
+            "PROD_NAME_ZQX",
+        ] {
+            assert!(
+                !contains(&bytes, needle.as_bytes()),
+                "{needle} found in plaintext in {}",
+                f.display()
+            );
         }
         let name = f.file_name().unwrap().to_string_lossy().into_owned();
-        assert!(matches!(name.as_str(), "vault.toml" | ".lock" | "dev.hush" | "prod.hush"), "unexpected file {name}");
+        assert!(
+            matches!(name.as_str(), "vault.toml" | ".lock" | "dev.hush" | "prod.hush"),
+            "unexpected file {name}"
+        );
     }
 }
 
@@ -224,8 +282,16 @@ fn a_wrong_key_fails_before_anything_is_written() {
     let env = Env::with_project("demo");
     env.set(&["A"], "1");
     let before = fs::read(env.file("demo", "dev")).unwrap();
-    for args in [&["set", "B"][..], &["rm", "A"], &["get", "A"], &["list"], &["run", "--", "x"]] {
-        env.run_with(env.cmd(KEY_B), args, Some(b"2\n")).fails().stderr_has("does not match");
+    for args in [
+        &["set", "B"][..],
+        &["rm", "A"],
+        &["get", "A"],
+        &["list"],
+        &["run", "--", "x"],
+    ] {
+        env.run_with(env.cmd(KEY_B), args, Some(b"2\n"))
+            .fails()
+            .stderr_has("does not match");
     }
     assert_eq!(fs::read(env.file("demo", "dev")).unwrap(), before);
 }
@@ -241,7 +307,11 @@ fn a_modified_file_is_rejected_and_not_overwritten() {
     fs::write(&path, &bytes).unwrap();
     env.hush(&["get", "A"]).fails().stderr_has("cannot decrypt");
     env.hush_in(&["set", "B"], "2\n").fails().stderr_has("cannot decrypt");
-    assert_eq!(fs::read(&path).unwrap(), bytes, "a failed write must leave the file as it was");
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        bytes,
+        "a failed write must leave the file as it was"
+    );
 }
 
 #[test]
@@ -262,14 +332,20 @@ fn files_moved_between_environments_or_projects_are_rejected() {
 fn names_are_validated_at_the_boundary() {
     let env = Env::with_project("demo");
     for project in ["../evil", "..", "a/b", "a\\b", "Demo", "con"] {
-        env.hush_in(&["-p", project, "set", "A"], "1\n").fails().stderr_has("invalid project name");
+        env.hush_in(&["-p", project, "set", "A"], "1\n")
+            .fails()
+            .stderr_has("invalid project name");
         env.hush(&["project", "create", project]).fails();
     }
     for e in ["../x", "nul", "Prod", "a.b"] {
-        env.hush_in(&["-e", e, "set", "A"], "1\n").fails().stderr_has("invalid environment name");
+        env.hush_in(&["-e", e, "set", "A"], "1\n")
+            .fails()
+            .stderr_has("invalid environment name");
     }
     for name in ["A-B", "1A", "A B", "A=B"] {
-        env.hush_in(&["set", name], "1\n").fails().stderr_has("invalid secret name");
+        env.hush_in(&["set", name], "1\n")
+            .fails()
+            .stderr_has("invalid secret name");
     }
     env.hush_in(&["set", "A"], "nul\0byte\n").fails().stderr_has("NUL");
     let parent = env.home.path().parent().unwrap();
@@ -282,16 +358,22 @@ fn production_environments_need_allow_prod_to_be_read() {
     let env = Env::with_project("demo");
     for prod in ["prod", "production"] {
         env.set(&["-e", prod, "SECRET"], "live");
-        env.hush(&["-e", prod, "get", "SECRET"]).fails().stderr_has("--allow-prod");
+        env.hush(&["-e", prod, "get", "SECRET"])
+            .fails()
+            .stderr_has("--allow-prod");
         env.hush(&["-e", prod, "export"]).fails().stderr_has("--allow-prod");
-        env.hush(&["-e", prod, "run", "--", "x"]).fails().stderr_has("--allow-prod");
+        env.hush(&["-e", prod, "run", "--", "x"])
+            .fails()
+            .stderr_has("--allow-prod");
         assert_eq!(env.get(&["-e", prod, "--allow-prod", "SECRET"]), "live");
         // Names only: listing a prod environment needs no flag.
         assert_eq!(env.hush(&["-e", prod, "list"]).ok().stdout(), "SECRET\n");
     }
     let mut c = env.cmd(KEY_A);
     c.env("HUSH_ENV", "prod");
-    env.run_with(c, &["get", "SECRET"], None).fails().stderr_has("--allow-prod");
+    env.run_with(c, &["get", "SECRET"], None)
+        .fails()
+        .stderr_has("--allow-prod");
 }
 
 #[cfg(windows)]
@@ -332,13 +414,17 @@ fn run_injects_secrets_and_passes_the_exit_code_through() {
 
     let r = env.hush(&run_args(&exit_with(7))).fails();
     assert_eq!(r.out.status.code(), Some(7));
-    env.hush(&["run", "--", "definitely-not-a-command-zqx"]).fails().stderr_has("command not found");
+    env.hush(&["run", "--", "definitely-not-a-command-zqx"])
+        .fails()
+        .stderr_has("command not found");
 }
 
 #[test]
 fn run_without_secrets_warns_and_still_runs() {
     let env = Env::with_project("demo");
-    env.hush(&run_args(&exit_with(0))).ok().stderr_has("no secrets stored in demo/dev");
+    env.hush(&run_args(&exit_with(0)))
+        .ok()
+        .stderr_has("no secrets stored in demo/dev");
 }
 
 #[cfg(windows)]
@@ -366,7 +452,9 @@ fn import_reads_dotenv_rules_and_export_round_trips() {
          SINGLE='lit$eral'\nESCAPED=\"cost \\$5\"\nMULTI=\"line1\\nline2\"\nEMPTY=\n",
     )
     .unwrap();
-    env.hush(&["import", src.to_str().unwrap()]).ok().stderr_has("Imported 9 secrets");
+    env.hush(&["import", src.to_str().unwrap()])
+        .ok()
+        .stderr_has("Imported 9 secrets");
     let got = env.json("dev");
     let want: BTreeMap<String, String> = [
         ("PLAIN", "abc"),
@@ -393,7 +481,9 @@ fn import_reads_dotenv_rules_and_export_round_trips() {
     assert_eq!(env.json("copy"), got);
 
     env.hush_in(&["set", "PLAIN"], "changed\n").ok();
-    env.hush(&["import", src.to_str().unwrap()]).ok().stderr_has("0 new, 9 replaced");
+    env.hush(&["import", src.to_str().unwrap()])
+        .ok()
+        .stderr_has("0 new, 9 replaced");
 }
 
 #[test]
@@ -411,10 +501,18 @@ fn concurrent_writers_lose_nothing() {
     let children: Vec<_> = (0..16)
         .map(|i| {
             let mut c = env.cmd(KEY_A);
-            c.args(["set", &format!("K{i:02}")]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+            c.args(["set", &format!("K{i:02}")])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
             let mut child = c.spawn().unwrap();
             use std::io::Write;
-            child.stdin.take().unwrap().write_all(format!("v{i}\n").as_bytes()).unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(format!("v{i}\n").as_bytes())
+                .unwrap();
             child
         })
         .collect();
@@ -434,7 +532,9 @@ fn concurrent_writers_lose_nothing() {
 #[test]
 fn destructive_and_revealing_commands_refuse_without_a_terminal() {
     let env = Env::with_project("demo");
-    env.hush_in(&["project", "delete", "demo"], "demo\n").fails().stderr_has("interactive terminal");
+    env.hush_in(&["project", "delete", "demo"], "demo\n")
+        .fails()
+        .stderr_has("interactive terminal");
     assert!(env.hush(&["project", "list"]).ok().stdout().contains("demo"));
     env.hush(&["recovery-key"]).fails().stderr_has("interactive terminal");
 }
@@ -447,7 +547,10 @@ fn value_strategy() -> impl Strategy<Value = String> {
 #[test]
 fn property_set_get_round_trips_any_value() {
     let env = Env::with_project("demo");
-    let mut runner = TestRunner::new(Config { cases: 40, ..Config::default() });
+    let mut runner = TestRunner::new(Config {
+        cases: 40,
+        ..Config::default()
+    });
     runner
         .run(&value_strategy(), |v| {
             env.hush_in(&["set", "P"], &format!("{v}\n")).ok();
@@ -460,7 +563,10 @@ fn property_set_get_round_trips_any_value() {
 #[test]
 fn property_export_then_import_round_trips_any_values() {
     let env = Env::with_project("demo");
-    let mut runner = TestRunner::new(Config { cases: 40, ..Config::default() });
+    let mut runner = TestRunner::new(Config {
+        cases: 40,
+        ..Config::default()
+    });
     let maps = proptest::collection::btree_map("[A-Z_][A-Z0-9_]{0,8}", value_strategy(), 1..5);
     runner
         .run(&maps, |m| {

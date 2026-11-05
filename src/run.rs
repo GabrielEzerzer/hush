@@ -26,8 +26,9 @@ pub fn run(command: &[OsString], secrets: &Secrets) -> Result<i32> {
         // The console delivers Ctrl+C to the child too. hush ignores it and waits, so the
         // shell prompt returns only after the child has shut down.
         ctrlc::set_handler(|| {}).context("installing the Ctrl+C handler")?;
-        let status = cmd.status().with_context(|| format!("starting {}", resolved.display()))?;
+        let status = cmd
+            .status()
+            .with_context(|| format!("starting {}", resolved.display()))?;
         Ok(status.code().unwrap_or(1))
     }
 }
-
