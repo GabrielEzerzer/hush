@@ -54,7 +54,7 @@ Any program works the same way: `hush run -- python main.py`, `hush run -- cargo
 | `hush project create <name>` | Create an empty project |
 | `hush project delete <name>` | Delete a project and its secrets, after you type its name |
 | `hush set NAME` | Store a secret. The value comes from a hidden prompt or from stdin, never from the command line |
-| `hush get NAME` | Print one value |
+| `hush get NAME` | Print one value. When the output is piped, as in `hush get KEY \| vercel env add KEY production`, it has no trailing newline; in a terminal it does |
 | `hush list` | List secret names, never values |
 | `hush rm NAME` | Remove a secret |
 | `hush import FILE` | Copy every variable in a `.env` file into the vault |
@@ -64,6 +64,8 @@ Any program works the same way: `hush run -- python main.py`, `hush run -- cargo
 Every command takes `-p/--project` (default: the project in `hush.toml`) and `-e/--env` (default: `dev`). `HUSH_PROJECT` and `HUSH_ENV` set the same things.
 
 To pipe a value in, for example from a script: `printf '%s' "$VALUE" | hush set NAME`. One trailing newline (or CRLF) is removed. An empty value is refused and the stored secret stays as it was.
+
+Secret names that differ only in case, such as `db_url` and `DB_URL`, are refused in one environment, because Windows treats them as one variable.
 
 `hush import` refuses a file that holds a `$` outside single quotes, unless it is escaped as `\$` or sits in a comment. Dotenv parsers replace `$NAME` and `${NAME}` with variables from the environment, so such a file could copy `HUSH_KEY` or a shell token into a stored value. The error names the line; single-quote the value or escape the `$`, then import again. Nothing is written until the whole file passes. Parse errors name the file and line but never show the line's content, since it may hold a value.
 

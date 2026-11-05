@@ -174,7 +174,13 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             let value = secrets
                 .get(name)
                 .with_context(|| format!("no secret {name} in {project}/{env}"))?;
-            println!("{value}");
+            // A pipe gets the exact value: a trailing newline would end up in the receiving tool.
+            let mut stdout = io::stdout().lock();
+            stdout.write_all(value.as_bytes())?;
+            if stdout.is_terminal() {
+                stdout.write_all(b"\n")?;
+            }
+            stdout.flush()?;
         }
         Cmd::List => {
             let (vault, project, env) = open(&cli, home)?;

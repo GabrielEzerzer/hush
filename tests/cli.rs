@@ -118,8 +118,7 @@ impl Env {
     fn get(&self, args: &[&str]) -> String {
         let mut all = vec!["get"];
         all.extend_from_slice(args);
-        let out = self.hush(&all).ok().stdout();
-        out.strip_suffix('\n').expect("get ends with a newline").to_owned()
+        self.hush(&all).ok().stdout()
     }
 
     fn file(&self, project: &str, env: &str) -> PathBuf {
@@ -745,6 +744,16 @@ fn an_agent_shell_cannot_print_values_or_unlock_prod() {
 "
     );
     agent(&run_args(&exit_with(0))).ok();
+}
+
+#[test]
+fn piped_get_prints_the_value_with_no_trailing_newline() {
+    let env = Env::with_project("demo");
+    // Compare raw bytes: the value ends in a space, which a trimming helper would hide.
+    env.set(&["PLAIN"], "abc123");
+    env.set(&["SPACED"], "ends with a space ");
+    assert_eq!(env.hush(&["get", "PLAIN"]).ok().out.stdout, b"abc123");
+    assert_eq!(env.hush(&["get", "SPACED"]).ok().out.stdout, b"ends with a space ");
 }
 
 fn value_strategy() -> impl Strategy<Value = String> {
