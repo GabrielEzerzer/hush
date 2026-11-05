@@ -14,7 +14,7 @@ The demo uses a throwaway vault and fake values. [`docs-assets/demo.tape`](docs-
 |---|---|---|
 | Windows | Windows Credential Manager | Tested; this is the platform hush is used on |
 | macOS | Keychain | Built and tested in CI, but the Keychain code has not been tried on a real Mac |
-| Linux | none yet | No keychain support. Set `HUSH_KEY` instead ([tracking issue](../../issues)) |
+| Linux | none yet | No keychain support. Set `HUSH_KEY` instead ([tracking issue](https://github.com/GabrielEzerzer/hushvault/issues/9)) |
 
 The tests run on all three in CI. They use `HUSH_KEY`, so they never touch a keychain.
 
