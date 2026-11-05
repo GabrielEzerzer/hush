@@ -421,7 +421,7 @@ fn init(home: &std::path::Path, name: Option<String>) -> Result<()> {
         eprintln!(
             "  {}{} {}",
             paint(ACCENT, cmd),
-            " ".repeat(29 - cmd.len()),
+            " ".repeat(29usize.saturating_sub(cmd.len())),
             paint(DIM, what)
         );
     }
