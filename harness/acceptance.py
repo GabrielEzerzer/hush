@@ -310,7 +310,11 @@ class Sandbox:
         with patch.multiple(module, CODE=code, VAULT=vault, GOALS=goals, T3=t3, run=run), \
                 patch.object(sys, "argv", argv), patch.dict(os.environ, self.env, clear=True), \
                 contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-            module.main()
+            try:
+                module.main()
+            except SystemExit:
+                # SystemExit is not an Exception, so it would end the run with no SCORE line.
+                raise Failure("new-project main exited early") from None
         self.no_values(captured.getvalue().encode(), "new-project main output")
         require(any(c[:3] == [str(t3), "project", "add"] for c in calls), "T3 stub was not exercised")
         staged = set(self.git("diff", "--cached", "--name-only", cwd=repo).stdout.decode().splitlines())
