@@ -82,7 +82,9 @@ What hush does not protect against:
 
 ## Rules for AI agents
 
-When an agent runs a command, its output goes into the model's context and is sent to the model provider. So agents may use `hush init`, `hush list`, `hush import`, `hush run`, and `hush set` with the value piped in from a file the user provided. They must not run `hush get`, `hush export` or `hush recovery-key`, or pass `--allow-prod`, and they must not use `hush run` to print the environment. A hook in the coding workspace blocks the first four.
+When an agent runs a command, its output goes into the model's context and is sent to the model provider. So agents may use `hush init`, `hush list`, `hush import`, `hush run`, and `hush set` with the value piped in from a file the user provided, but they must never see a value.
+
+Hush enforces part of this itself. When `CLAUDECODE` is set, as it is in every shell Claude Code starts, hush refuses `get`, `export`, `recovery-key` and `--allow-prod`. This guards against accidents, not against an agent working around it: it can't stop `hush run` from starting a program that prints its environment.
 
 ## A new machine
 

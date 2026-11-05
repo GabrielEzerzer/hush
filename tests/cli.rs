@@ -78,7 +78,8 @@ impl Env {
             .env("HUSH_HOME", self.home.path())
             .env("HUSH_KEY", key)
             .env_remove("HUSH_PROJECT")
-            .env_remove("HUSH_ENV");
+            .env_remove("HUSH_ENV")
+            .env_remove("CLAUDECODE");
         c
     }
 
@@ -537,6 +538,36 @@ fn destructive_and_revealing_commands_refuse_without_a_terminal() {
         .stderr_has("interactive terminal");
     assert!(env.hush(&["project", "list"]).ok().stdout().contains("demo"));
     env.hush(&["recovery-key"]).fails().stderr_has("interactive terminal");
+}
+
+#[test]
+fn an_agent_shell_cannot_print_values_or_unlock_prod() {
+    let env = Env::with_project("demo");
+    env.set(&["A"], "1");
+    env.set(&["-e", "prod", "A"], "live");
+    let agent = |args: &[&str]| {
+        let mut c = env.cmd(KEY_A);
+        c.env("CLAUDECODE", "1");
+        env.run_with(c, args, None)
+    };
+    for args in [
+        &["get", "A"][..],
+        &["export"],
+        &["export", "--format", "json"],
+        &["recovery-key"],
+    ] {
+        agent(args).fails().stderr_has("AI agent");
+    }
+    agent(&["-e", "prod", "--allow-prod", "run", "--", "x"])
+        .fails()
+        .stderr_has("AI agent");
+    // Names, writes and dev runs stay available to agents.
+    assert_eq!(
+        agent(&["list"]).ok().stdout(),
+        "A
+"
+    );
+    agent(&run_args(&exit_with(0))).ok();
 }
 
 fn value_strategy() -> impl Strategy<Value = String> {

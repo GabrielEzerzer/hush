@@ -110,6 +110,7 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
     match cli.cmd {
         Cmd::Setup { recover } => setup(home, recover)?,
         Cmd::RecoveryKey => {
+            refuse_agent("show the recovery key")?;
             ensure!(
                 io::stdin().is_terminal() && io::stdout().is_terminal(),
                 "the recovery key is shown only in an interactive terminal"
@@ -166,6 +167,7 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             );
         }
         Cmd::Get { ref name } => {
+            refuse_agent("print secret values")?;
             let (vault, project, env) = open_for_reading(&cli, home)?;
             let secrets = vault.read(&project, &env)?.unwrap_or_default();
             let value = secrets
@@ -194,6 +196,7 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         }
         Cmd::Import { ref file } => import(&cli, home, file)?,
         Cmd::Export { format } => {
+            refuse_agent("print secret values")?;
             let (vault, project, env) = open_for_reading(&cli, home)?;
             let secrets = vault.read(&project, &env)?.unwrap_or_default();
             let mut out = io::stdout().lock();
@@ -240,7 +243,19 @@ fn open(cli: &Cli, home: PathBuf) -> Result<(Vault, String, String)> {
     Ok((Vault::open(home)?, project, cli.env.clone()))
 }
 
+/// Claude Code sets CLAUDECODE in every shell it starts. Anything printed there goes into the
+/// model's context, so hush refuses to print values or unlock prod for it.
+fn refuse_agent(what: &str) -> Result<()> {
+    if std::env::var_os("CLAUDECODE").is_some_and(|v| !v.is_empty()) {
+        bail!("hush does not {what} inside an AI agent's shell (CLAUDECODE is set); run it in your own terminal");
+    }
+    Ok(())
+}
+
 fn open_for_reading(cli: &Cli, home: PathBuf) -> Result<(Vault, String, String)> {
+    if cli.allow_prod {
+        refuse_agent("read production secrets")?;
+    }
     if is_prod(&cli.env) && !cli.allow_prod {
         bail!("'{}' holds production secrets; pass --allow-prod to read them", cli.env);
     }
