@@ -101,16 +101,14 @@ fn key_from(var: Result<String, std::env::VarError>) -> Result<Option<MasterKey>
 
 fn create_private_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
-    {
+    let made = {
         use std::os::unix::fs::DirBuilderExt;
         fs::DirBuilder::new().recursive(true).mode(0o700).create(path)
-    }
+    };
+    // On Windows the folder inherits the per-user ACL of %APPDATA%.
     #[cfg(not(unix))]
-    {
-        // On Windows the folder inherits the per-user ACL of %APPDATA%.
-        fs::create_dir_all(path)
-    }
-    .with_context(|| format!("creating {}", path.display()))
+    let made = fs::create_dir_all(path);
+    made.with_context(|| format!("creating {}", path.display()))
 }
 
 pub struct SetupOutcome {
