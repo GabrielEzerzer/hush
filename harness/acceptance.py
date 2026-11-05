@@ -26,6 +26,10 @@ class Failure(Exception):
     """Only controlled, value-free messages may reach the console."""
 
 
+class Skip(Exception):
+    """A scenario needs an optional input that was not supplied."""
+
+
 def require(condition, message):
     if not condition:
         raise Failure(message)
@@ -270,6 +274,8 @@ class Sandbox:
         return {line.split("  (", 1)[0] for line in output.splitlines()}
 
     def load_new_project(self):
+        if self.new_project is None:
+            raise Skip("no --new-project script")
         require(self.new_project.is_file(), "new-project script does not exist")
         spec = importlib.util.spec_from_file_location("acceptance_new_project", self.new_project)
         require(spec is not None and spec.loader is not None, "cannot import new-project script")
@@ -357,7 +363,10 @@ class Sandbox:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hush", type=Path, help="use an existing binary instead of building")
-    parser.add_argument("--new-project", type=Path, default=Path("D:/code/setup/new-project.py"))
+    parser.add_argument("--new-project", type=Path,
+                        default=os.environ.get("HUSH_ACCEPTANCE_NEW_PROJECT") or None,
+                        help="project creation script with link_hush (default: $HUSH_ACCEPTANCE_NEW_PROJECT); "
+                             "without one, the scenarios that need it are skipped")
     parser.add_argument("--set", choices=("dev", "test"), default="dev")
     args = parser.parse_args()
     binary_name = "hush.exe" if os.name == "nt" else "hush"
@@ -386,14 +395,18 @@ def main():
             build_error = "offline release build could not complete"
     if not binary.is_file():
         build_error = build_error or "hush binary does not exist"
-    passed = 0
+    new_project = Path(args.new_project).resolve() if args.new_project else None
+    passed = skipped = 0
     for identifier, point, function in SCENARIOS:
         box = None
         failure = build_error
+        skip = None
         if failure is None:
             try:
-                box = Sandbox(binary, args.new_project.resolve())
+                box = Sandbox(binary, new_project)
                 function(box)
+            except Skip as reason:
+                skip = str(reason)
             except Failure as error:
                 failure = str(error)
             except Exception as error:
@@ -408,11 +421,15 @@ def main():
                         failure = failure + "; " + note if failure else note
         if failure:
             print(f"FAIL {identifier}: point {point}: {failure}", flush=True)
+        elif skip:
+            skipped += 1
+            print(f"SKIP {identifier}: {skip}", flush=True)
         else:
             passed += 1
             print(f"PASS {identifier}: point {point}", flush=True)
-    print(f"SCORE: {passed}/{len(SCENARIOS)}", flush=True)
-    return 0 if passed == len(SCENARIOS) else 1
+    counted = len(SCENARIOS) - skipped
+    print(f"SCORE: {passed}/{counted}" + (f" ({skipped} skipped)" if skipped else ""), flush=True)
+    return 0 if passed == counted else 1
 
 
 if __name__ == "__main__":

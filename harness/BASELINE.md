@@ -12,7 +12,7 @@ the score.
 | `python harness/acceptance.py` (run 2) | `SCORE: 24/27` |
 | `python harness/acceptance.py --set test` | `SCORE: 11/13` |
 
-Every failure is requirement 2. The default `D:/code/setup/new-project.py` has
+Every failure is requirement 2. The project creation script used then (`<workspace>/setup/new-project.py`) had
 no `link_hush` function; its `main` starts at line 20 and its Git staging call
 at line 60 stages only README.md. Consequently the real helper cannot be
 called for any project-linking scenario:
@@ -24,7 +24,7 @@ called for any project-linking scenario:
 - `test-unavailable-hush-preserves-existing-project-files`
 
 Supplemental checks used `--hush` pointing to the same built release binary
-and `--new-project D:/code/.worktrees/code-hush-routing/setup/new-project.py`.
+and `--new-project <routing worktree>/setup/new-project.py`.
 That routing worktree was at `97d574992b50bb75e19bb81f49c750d392eea079`:
 
 | Set | Final line |
@@ -90,7 +90,7 @@ before repeating the final suites and mutation checks. Both temporary mutation
 worktrees use their own `CARGO_TARGET_DIR` and are removed after the check.
 
 Final validation used
-`--new-project D:/code/.worktrees/code-hush-routing/setup/new-project.py`
+`--new-project <routing worktree>/setup/new-project.py`
 (routing worktree at `7ca4f7ab7ac7bec5a2c80aa7fba88f16c8e195e7`). All three
 commands built offline under this checkout's ignored `target/acceptance`.
 
@@ -128,3 +128,16 @@ command with "blocked by policy", despite the process check showing no hush
 suite running before the attempt. Suite-created sandboxes and both scratch
 mutation worktrees cleaned up successfully. Real keychain, personal vault,
 GitHub/T3 actions, network scenarios, and long-running services were not used.
+
+## Optional new-project script, 2026-11-05
+
+The new-project script is private to the author's workspace, so it no longer
+has a default path. It comes from `--new-project` or
+`HUSH_ACCEPTANCE_NEW_PROJECT`; without either, the five dev scenarios that
+need it report `SKIP` and are left out of the total. No assertion changed.
+With the crate renamed to `hushvault` (binary still `hush`):
+
+| Command | Final line |
+| --- | --- |
+| `python harness/acceptance.py --new-project <workspace>/setup/new-project.py` | `SCORE: 31/31` |
+| `python harness/acceptance.py` | `SCORE: 26/26 (5 skipped)` |
