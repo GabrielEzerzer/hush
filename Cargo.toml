@@ -1,10 +1,19 @@
 [package]
-name = "hush"
+name = "hushvault"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
-description = "Per-project encrypted secrets, injected into apps at runtime"
-publish = false
+description = "Per-project encrypted secrets, injected into apps at runtime. Installs the `hush` command."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GabrielEzerzer/hushvault"
+readme = "README.md"
+keywords = ["secrets", "dotenv", "vault", "cli", "encryption"]
+categories = ["command-line-utilities", "cryptography", "development-tools"]
+include = ["/src/**/*", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE"]
+
+[[bin]]
+name = "hush"
+path = "src/main.rs"
 
 [dependencies]
 anstream = "1"

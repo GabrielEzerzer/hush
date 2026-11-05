@@ -1,11 +1,39 @@
-# Hush
+# hush
 
-Hush keeps every project's secrets in one encrypted vault that lives outside all repos. Each project has its own space in the vault, split into environments such as `dev` and `prod`. Apps get their secrets when they start, through `hush run`, so no file with real values ever sits in a repo.
+> **Read this first.** hush is a personal project. It has not been audited and has not had a professional security review. Don't rely on it for high-stakes secrets. It comes with no warranty of any kind; see the licence files. The section [What hush does not protect against](#what-hush-does-not-protect-against) lists known limits.
+
+hush keeps every project's secrets in one encrypted vault that lives outside all repos. Each project has its own space in the vault, split into environments such as `dev` and `prod`. Apps get their secrets when they start, through `hush run`, so no file with real values ever sits in a repo.
+
+![A terminal session: hush init, a secret piped in from a file, hush list, hush run passing the secret to an app, and hush get refused inside an AI agent's shell](docs-assets/demo.gif)
+
+The demo uses a throwaway vault and fake values. [`docs-assets/demo.tape`](docs-assets/demo.tape) records it with [vhs](https://github.com/charmbracelet/vhs).
+
+## Platform status
+
+| Platform | Key storage | Status |
+|---|---|---|
+| Windows | Windows Credential Manager | Tested; this is the platform hush is used on |
+| macOS | Keychain | Built and tested in CI, but the Keychain code has not been tried on a real Mac |
+| Linux | none yet | No keychain support. Set `HUSH_KEY` instead ([tracking issue](https://github.com/GabrielEzerzer/hushvault/issues/9)) |
+
+The tests run on all three in CI. They use `HUSH_KEY`, so they never touch a keychain.
 
 ## Install
 
+**Prebuilt binaries.** Download the archive for your platform from the [Releases page](https://github.com/GabrielEzerzer/hushvault/releases), unpack it, and put `hush` (`hush.exe` on Windows) somewhere on your `PATH`. Each release has a `SHA256SUMS` file to check the download against.
+
+**With Cargo.** The crate is called `hushvault`, because `hush` was taken on crates.io. The command it installs is still `hush`.
+
 ```sh
-cargo install --path .        # from a checkout of this repo; puts hush in ~/.cargo/bin
+cargo install hushvault
+```
+
+**From source.** You need Rust 1.89 or newer.
+
+```sh
+git clone https://github.com/GabrielEzerzer/hushvault
+cd hushvault
+cargo install --path .        # puts hush in ~/.cargo/bin
 ```
 
 ## First-time setup
@@ -17,17 +45,19 @@ hush recovery-key             # save the key it prints in your password manager
 
 `hush setup` creates the vault at `%APPDATA%\hush` (macOS: `~/Library/Application Support/hush`) and a random 256-bit key, which it stores in Windows Credential Manager (macOS: Keychain). Without the recovery key, losing the keychain entry means losing every secret, so save it before you store anything.
 
+On Linux, see [Machines without a keychain](#machines-without-a-keychain).
+
 ## Using it in a project
 
 ```sh
-cd D:\code\my-app
+cd my-app
 hush init                     # writes hush.toml, creates the project in the vault, adds .env patterns to .gitignore
 hush set STRIPE_KEY           # prompts for the value without echoing it
 hush import .env.local        # or move an existing .env file in, then delete the file
 hush run -- npm run dev       # starts the app with the secrets in its environment
 ```
 
-Commit `hush.toml`. It only names the vault project (`project = "my-app"`), and it is how every checkout and worktree of the repo finds its secrets. Hush looks for it in the current folder and every folder above it, up to the repo root (the first folder that holds `.git`), so a stray `hush.toml` above the repo is ignored.
+Commit `hush.toml`. It only names the vault project (`project = "my-app"`), and it is how every checkout and worktree of the repo finds its secrets. hush looks for it in the current folder and every folder above it, up to the repo root (the first folder that holds `.git`), so a stray `hush.toml` above the repo is ignored.
 
 Point the scripts that need secrets at `hush run` so nobody has to remember it:
 
@@ -81,26 +111,37 @@ Each project has as many environments as you need. `dev` is the default. Give pr
 - **Writes** take a per-project lock and replace the file through a rename, so concurrent `hush set` calls don't lose each other's changes and a crash never leaves a half-written file. A wrong key or a damaged file stops the write before anything changes.
 - **Command lines.** `hush set` never takes the value as an argument, so values don't end up in shell history or process listings.
 
-What hush does not protect against:
+### What hush does not protect against
 
-- Malware running as your Windows user. It can ask the keychain for the key, as hush does.
+- Malware running as your user. It can ask the keychain for the key, as hush does.
 - The app itself. Once `hush run` starts a program, that program has the values in its environment and can print or log them, as it could with a `.env` file.
 - Anyone who reads the output of `hush get` or `hush export`.
 - Rollback or deletion of a file. Each environment file is checked on its own, so restoring an older copy of an environment file, or deleting it, is not detected. An older copy decrypts and its old values are used.
 
 ## Rules for AI agents
 
-When an agent runs a command, its output goes into the model's context and is sent to the model provider. So agents may use `hush init`, `hush list`, `hush import`, `hush run`, and `hush set` with the value piped in from a file the user provided, but they must never see a value.
+hush is built so a coding agent can work in a repo that uses secrets without ever seeing them. When an agent runs a command, its output goes into the model's context and is sent to the model provider. So agents may use `hush init`, `hush list`, `hush import`, `hush run`, and `hush set` with the value piped in from a file the user provided, but they must never see a value. Put these rules in your agent's instructions file (for example `CLAUDE.md` or `AGENTS.md`).
 
-Hush enforces part of this itself. When `CLAUDECODE` is set, as it is in every shell Claude Code starts, hush refuses `get`, `export`, `recovery-key` and `--allow-prod`. This guards against accidents, not against an agent working around it: it can't stop `hush run` from starting a program that prints its environment. These rules depend on the agent cooperating. An agent's shell runs as your user, and any process running as your user can read the vault key from Credential Manager (macOS: Keychain) and decrypt the vault itself.
+hush enforces part of this itself. When `CLAUDECODE` is set to a non-empty value, as it is in every shell Claude Code starts, hush refuses `get`, `export`, `recovery-key` and `--allow-prod`. Other agents don't set `CLAUDECODE`; to get the same refusals with them, set `CLAUDECODE=1` in the environment the agent's shell starts with.
+
+This guards against accidents, not against an agent working around it: it can't stop `hush run` from starting a program that prints its environment. These rules depend on the agent cooperating. An agent's shell runs as your user, and any process running as your user can read the vault key from the OS keychain and decrypt the vault itself.
 
 ## A new machine
 
-Copy the vault folder (`%APPDATA%\hush`) across, install hush, and run `hush setup --recover`, which asks for the recovery key and puts it in the new machine's keychain.
+Copy the vault folder (`%APPDATA%\hush`, or `HUSH_HOME` if you set it) across, install hush, and run `hush setup --recover`, which asks for the recovery key and puts it in the new machine's keychain.
 
 ## Machines without a keychain
 
-On Linux, in CI or in a cloud sandbox, set `HUSH_KEY` to the recovery key and `HUSH_HOME` to the vault folder. While `HUSH_KEY` is set, hush never reads or writes the OS keychain. For hosted apps such as Vercel, the platform keeps its own copy of the production values: run `hush export -e prod --allow-prod` in your own terminal and paste the values into the platform's settings.
+On Linux, in CI or in a cloud sandbox, set `HUSH_KEY` to the vault key (the recovery key, or 64 hex digits) and, if the vault is not in the default place (`~/.local/share/hush` on Linux), `HUSH_HOME` to the vault folder. While `HUSH_KEY` is set, hush never reads or writes the OS keychain. To start a new vault on Linux:
+
+```sh
+export HUSH_KEY="$(openssl rand -hex 32)"   # keep this value somewhere safe, such as a password manager
+hush setup
+```
+
+How you keep `HUSH_KEY` out of shell history and other users' reach is up to you; anyone who has it can decrypt the vault.
+
+For hosted apps such as Vercel, the platform keeps its own copy of the production values: run `hush export -e prod --allow-prod` in your own terminal and paste the values into the platform's settings.
 
 ## Development
 
@@ -110,4 +151,12 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-The tests give every case its own vault in a temp folder and a fixed `HUSH_KEY`, so they never touch the real keychain or the real vault.
+The tests give every case its own vault in a temp folder and a fixed `HUSH_KEY`, so they never touch the real keychain or the real vault. `harness/` holds a slower Windows acceptance suite; see [harness/README.md](harness/README.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
+
+## Licence
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT), at your option.

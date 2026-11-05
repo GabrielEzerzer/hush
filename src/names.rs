@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn path_names() {
-        for ok in ["ran-ai", "dev", "prod", "a", "x_1", "9lives"] {
+        for ok in ["web-app", "dev", "prod", "a", "x_1", "9lives"] {
             check_path_name("project", ok).unwrap();
         }
         for bad in [

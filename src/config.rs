@@ -62,8 +62,8 @@ pub fn repo_root(cwd: &Path) -> PathBuf {
     git(cwd, &["rev-parse", "--show-toplevel"]).unwrap_or_else(|| cwd.to_path_buf())
 }
 
-/// The main checkout's folder name, lowercased, so a worktree such as `ran-ai-fix-x` still
-/// suggests `ran-ai`.
+/// The main checkout's folder name, lowercased, so a worktree such as `web-app-fix-x` still
+/// suggests `web-app`.
 pub fn default_name(root: &Path) -> String {
     let main = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .and_then(|common| common.parent().map(Path::to_path_buf))
@@ -116,10 +116,10 @@ mod tests {
     #[test]
     fn find_walks_up() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "ran-ai").unwrap();
+        write(dir.path(), "web-app").unwrap();
         let deep = dir.path().join("a").join("b");
         fs::create_dir_all(&deep).unwrap();
-        assert_eq!(find(&deep).unwrap().unwrap().project, "ran-ai");
+        assert_eq!(find(&deep).unwrap().unwrap().project, "web-app");
     }
 
     #[test]

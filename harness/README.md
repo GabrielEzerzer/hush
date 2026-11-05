@@ -1,6 +1,6 @@
 # Hush acceptance suite
 
-Run from the hush checkout with Python 3 on native Windows. The suite uses only
+Run from a hush checkout with Python 3 on native Windows. The suite uses only
 the Python standard library; Git, the Rust toolchain, Node.js, and npm must be
 installed. No npm install, network access, VM, container, server, or daemon is
 needed for scenarios.
@@ -24,18 +24,24 @@ python harness/acceptance.py --hush C:/path/to/hush.exe
 The supplied binary must be named `hush.exe` (`hush` off Windows), so npm and
 executable discovery on PATH select the same binary as direct calls.
 
-The default project creation script is `D:/code/setup/new-project.py`. Point at
-a candidate version explicitly to test its real `link_hush` function:
+Some scenarios test a project creation script, `new-project.py`, that lives in
+the author's private workspace and is not part of this repo. Pass its path with
+`--new-project`, or set `HUSH_ACCEPTANCE_NEW_PROJECT`, to run them:
 
 ```powershell
-python harness/acceptance.py --new-project D:/code/.worktrees/code-hush-routing/setup/new-project.py
-python harness/acceptance.py --set test --new-project D:/code/.worktrees/code-hush-routing/setup/new-project.py
+python harness/acceptance.py --new-project C:/path/to/new-project.py
+python harness/acceptance.py --set test --new-project C:/path/to/new-project.py
 ```
 
-The helper is imported with `importlib` and called on a fresh temporary Git
-repository. Its subprocess and executable discovery are real, including the
-case where hush is absent from PATH. A missing script or missing `link_hush`
-is an acceptance failure, never a skip or a fallback to a different script.
+Without either, those scenarios print `SKIP id: no --new-project script` and
+are left out of the total, which then shows the skip count, for example
+`SCORE: 26/26 (5 skipped)`. Every other scenario runs as usual.
+
+When a script is given, the helper is imported with `importlib` and called on
+a fresh temporary Git repository. Its subprocess and executable discovery are
+real, including the case where hush is absent from PATH. A given path that
+does not exist, or a script without `link_hush`, is an acceptance failure,
+never a skip or a fallback to a different script.
 Additional cases run `main` with `--no-github`, temporary CODE/VAULT/GOALS paths,
 and a temporary goal note. The `run` stub allows real Git init/add in that repo,
 leaves the index staged instead of committing, and intercepts T3. It refuses
