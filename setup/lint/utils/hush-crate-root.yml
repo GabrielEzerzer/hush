@@ -21,3 +21,15 @@ rule:
         - has:
             field: name
             kind: super
+    - kind: scoped_identifier
+      has:
+        field: path
+        kind: self
+      all:
+        - has:
+            field: name
+            kind: super
+        - not:
+            inside:
+              kind: mod_item
+              stopBy: end

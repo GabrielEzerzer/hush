@@ -34,6 +34,13 @@ class Layers(unittest.TestCase):
                            ("src/names.rs", "use std as s;\n"), ("src/style.rs", "use std::{self as s};\n")]:
             self.check(rule, {name: text}, {})
         self.check(rule, {}, {"src/crypto.rs": "use std::collections::*;\nuse std::fmt::{self, Write as _};\n"})
+        for name, text in [("src/crypto.rs", "use std::{collections::{BTreeMap}, fs};\n"),
+                           ("src/names.rs", "use std::{collections::BTreeMap, fmt::{self}, io::Write};\n"),
+                           ("src/style.rs", "use std::{fmt::{Write}, *};\n"), ("src/crypto.rs", "use ::std::{{os}};\n"),
+                           ("src/names.rs", "use std::{fmt::{self}, self as s};\n"),
+                           ("src/style.rs", "use std::{fmt::{Write}, io::*};\n")]:
+            self.check(rule, {name: text}, {})
+        self.check(rule, {}, {"src/crypto.rs": "use std::{collections::*, fmt};\nuse std::{fmt::{self, Write as io}};\n"})
 
     def test_leaf_modules_import_nothing_from_the_crate(self):
         self.check("hush-leaf-modules-import-nothing-from-the-crate", {
@@ -67,6 +74,10 @@ class Layers(unittest.TestCase):
                      "use crate::{names, run::*};\n", "mod keychain { use super::super::run; }\n",
                      "use crate as c;\n", "use crate::{self as c};\n"]:
             self.check("hush-vault-imports-only-crypto-and-names", {"src/vault.rs": text}, {})
+        for text in ["use self::super::run;\n", "fn f() { self::super::run::run(); }\n"]:
+            self.check("hush-vault-imports-only-crypto-and-names", {"src/vault.rs": text}, {})
+        for text in ["use self::super::crypto;\n", "mod keychain { use self::super::names; use self::super::Vault; }\n"]:
+            self.check("hush-vault-imports-only-crypto-and-names", {}, {"src/vault.rs": text})
         for text in ["use super::crypto::{self, MasterKey};\n", "mod tests { use super::*; }\n",
                      "mod keychain { use super::*; fn f() -> crate::crypto::MasterKey { todo!() } }\n"]:
             self.check("hush-vault-imports-only-crypto-and-names", {}, {"src/vault.rs": text})
@@ -121,6 +132,15 @@ class Layers(unittest.TestCase):
                              "{ anyhow::bail!(\"{}\", String::from_utf8_lossy(&out.stderr)) }\n",
         })
         self.check("hush-only-main-talks-to-the-user", {"src/run.rs": "use anstream::*;\n"}, {})
+        for text in ["use std::io::*;\nfn f() { stdout().write_all(b\"x\").unwrap(); }\n",
+                     "use std::io::{self, *};\nfn f() { let _ = stderr(); }\n",
+                     "fn f() { std::println!(\"x\"); }\n", "fn f() { ::std::eprintln!(\"x\"); }\n"]:
+            self.check("hush-only-main-talks-to-the-user", {"src/vault.rs": text}, {})
+        self.check("hush-only-main-talks-to-the-user", {}, {
+            "src/config.rs": "fn f(out: &std::process::Output) -> PathBuf "
+                             "{ PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()) }\n",
+            "src/vault.rs": "fn f(out: std::process::Output) { anyhow::bail!(\"{:?}\", out . stdin); }\n",
+        })
 
     def test_clap_stays_in_the_cli(self):
         self.check("hush-clap-stays-in-the-cli", {

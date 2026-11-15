@@ -9,7 +9,24 @@ files:
 rule:
   any:
     - kind: use_declaration
-      regex: '\bstd::(?:\{[^}]*)?(?:\b(?:fs|io|net|process|env|thread|os)\b|\*|\bself\s+as\b)|\bstd\s+as\b'
+      regex: '\bstd::(?:(?:fs|io|net|process|env|thread|os)\b|\*)|\bstd\s+as\b'
+    - any:
+        - kind: identifier
+        - kind: scoped_identifier
+        - kind: scoped_use_list
+        - kind: use_as_clause
+        - kind: use_wildcard
+      regex: '^(?:(?:fs|io|net|process|env|thread|os)\b|self\s+as\b|\*)'
+      inside:
+        kind: use_list
+        inside:
+          kind: scoped_use_list
+          stopBy:
+            not:
+              kind: use_list
+          has:
+            field: path
+            regex: '^(?:::)?std$'
     - all:
         - any:
             - kind: scoped_identifier
@@ -153,11 +170,14 @@ rule:
     - kind: macro_invocation
       has:
         field: macro
-        regex: '^(?:e?print(?:ln)?|dbg)$'
-    - kind: macro_invocation
-      regex: '::\s*(?:stdout|stderr|stdin)\b'
+        regex: '^(?:(?:::)?std::)?(?:e?print(?:ln)?|dbg)$'
+    - kind: identifier
+      regex: '^(?:stdout|stderr|stdin)$'
+      not:
+        follows:
+          regex: '^\.$'
     - matches: hush-path-segment
-      regex: '^(?:anstream|rpassword|stdout|stderr|stdin)$'
+      regex: '^(?:anstream|rpassword)$'
 ---
 id: hush-clap-stays-in-the-cli
 language: Rust
