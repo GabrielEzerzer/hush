@@ -22,6 +22,14 @@ rule:
             field: name
             kind: super
     - kind: scoped_identifier
+      all:
+        - has:
+            field: path
+            regex: '^self\s*::\s*super$'
+        - has:
+            field: name
+            kind: super
+    - kind: scoped_identifier
       has:
         field: path
         kind: self

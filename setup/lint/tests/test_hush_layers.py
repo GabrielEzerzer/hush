@@ -72,6 +72,7 @@ class Layers(unittest.TestCase):
         for text in ["use super::run;\n", "fn f() { super::config::load(); }\n", "use crate::*;\n",
                      "fn f() -> crate::Cli { todo!() }\n", "use crate::{crypto, config as c};\n",
                      "use crate::{names, run::*};\n", "mod keychain { use super::super::run; }\n",
+                     "mod keychain { use self::super::super::run; }\n",
                      "use crate as c;\n", "use crate::{self as c};\n"]:
             self.check("hush-vault-imports-only-crypto-and-names", {"src/vault.rs": text}, {})
         for text in ["use self::super::run;\n", "fn f() { self::super::run::run(); }\n"]:
@@ -134,13 +135,21 @@ class Layers(unittest.TestCase):
         self.check("hush-only-main-talks-to-the-user", {"src/run.rs": "use anstream::*;\n"}, {})
         for text in ["use std::io::*;\nfn f() { stdout().write_all(b\"x\").unwrap(); }\n",
                      "use std::io::{self, *};\nfn f() { let _ = stderr(); }\n",
-                     "fn f() { std::println!(\"x\"); }\n", "fn f() { ::std::eprintln!(\"x\"); }\n"]:
+                     "fn f() { std::println!(\"x\"); }\n", "fn f() { ::std::eprintln!(\"x\"); }\n",
+                     "fn f() { std::dbg!(1); }\n", "fn f() { std :: println!(\"x\"); }\n"]:
             self.check("hush-only-main-talks-to-the-user", {"src/vault.rs": text}, {})
         self.check("hush-only-main-talks-to-the-user", {}, {
             "src/config.rs": "fn f(out: &std::process::Output) -> PathBuf "
                              "{ PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()) }\n",
             "src/vault.rs": "fn f(out: std::process::Output) { anyhow::bail!(\"{:?}\", out . stdin); }\n",
+            "src/run.rs": "fn f(w: &mut std::io::Stdout) { let _ = w; }\n",
         })
+        for text in ["fn f(out: std::process::Output) -> anyhow::Result<()> "
+                     "{ let stderr = String::from_utf8_lossy(&out.stderr); anyhow::bail!(\"git failed: {stderr}\") }\n",
+                     "use std::process::Output;\nfn f(out: Output) -> anyhow::Result<()> "
+                     "{ let Output { status, stderr, .. } = out; "
+                     "anyhow::ensure!(status.success(), \"git failed: {}\", String::from_utf8_lossy(&stderr)); Ok(()) }\n"]:
+            self.check("hush-only-main-talks-to-the-user", {}, {"src/config.rs": text})
 
     def test_clap_stays_in_the_cli(self):
         self.check("hush-clap-stays-in-the-cli", {

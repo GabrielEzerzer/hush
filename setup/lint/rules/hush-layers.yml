@@ -170,12 +170,30 @@ rule:
     - kind: macro_invocation
       has:
         field: macro
-        regex: '^(?:(?:::)?std::)?(?:e?print(?:ln)?|dbg)$'
+        regex: '^(?:(?:::\s*)?std\s*::\s*)?(?:e?print(?:ln)?|dbg)$'
     - kind: identifier
       regex: '^(?:stdout|stderr|stdin)$'
-      not:
-        follows:
-          regex: '^\.$'
+      any:
+        - inside:
+            kind: scoped_identifier
+        - inside:
+            kind: use_declaration
+            stopBy: end
+        - inside:
+            kind: call_expression
+            field: function
+        - all:
+            - inside:
+                kind: token_tree
+            - not:
+                follows:
+                  regex: '^\.$'
+            - any:
+                - follows:
+                    regex: '^::$'
+                - precedes:
+                    kind: token_tree
+                    regex: '^\('
     - matches: hush-path-segment
       regex: '^(?:anstream|rpassword)$'
 ---
