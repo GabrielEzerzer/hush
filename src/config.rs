@@ -26,8 +26,6 @@ pub fn read(dir: &Path) -> Result<Option<ProjectFile>> {
     }
 }
 
-/// The nearest hush.toml in `start` or any folder above it, up to the repo root: the first folder
-/// holding `.git` (a folder, or a file in a worktree). A stray hush.toml above the repo is ignored.
 pub fn find(start: &Path) -> Result<Option<ProjectFile>> {
     for dir in start.ancestors() {
         if let Some(f) = read(dir)? {
@@ -57,13 +55,10 @@ fn git(dir: &Path, args: &[&str]) -> Option<PathBuf> {
         .then(|| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
 }
 
-/// The repo's top folder, or `cwd` outside a git repo.
 pub fn repo_root(cwd: &Path) -> PathBuf {
     git(cwd, &["rev-parse", "--show-toplevel"]).unwrap_or_else(|| cwd.to_path_buf())
 }
 
-/// The main checkout's folder name, lowercased, so a worktree such as `web-app-fix-x` still
-/// suggests `web-app`.
 pub fn default_name(root: &Path) -> String {
     let main = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .and_then(|common| common.parent().map(Path::to_path_buf))
@@ -77,7 +72,6 @@ const IGNORE_MARKER: &str = "# hush:";
 const IGNORE_BLOCK: &str =
     "# hush: secrets live in the hush vault, never in files in the repo\n.env\n.env.*\n!.env.example\n";
 
-/// Adds .env patterns to .gitignore once. Returns whether the file changed.
 pub fn ignore_env_files(root: &Path) -> Result<bool> {
     let path = root.join(".gitignore");
     let current = match fs::read_to_string(&path) {

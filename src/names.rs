@@ -2,10 +2,8 @@
 
 use anyhow::{Result, bail, ensure};
 
-/// Device names Windows reserves in any folder, with or without an extension.
-const WINDOWS_RESERVED: &[&str] = &["con", "prn", "aux", "nul"];
+const WINDOWS_RESERVED_DEVICE_NAMES: &[&str] = &["con", "prn", "aux", "nul"];
 
-/// Project and environment names become folder and file names in the vault.
 pub fn check_path_name(kind: &str, s: &str) -> Result<()> {
     let charset = s
         .bytes()
@@ -18,7 +16,7 @@ pub fn check_path_name(kind: &str, s: &str) -> Result<()> {
         charset && first && s.len() <= 64,
         "invalid {kind} name '{s}': use lowercase letters, digits, '-' and '_', starting with a letter or digit, up to 64 characters"
     );
-    let reserved = WINDOWS_RESERVED.contains(&s)
+    let reserved = WINDOWS_RESERVED_DEVICE_NAMES.contains(&s)
         || ((s.starts_with("com") || s.starts_with("lpt")) && s.len() == 4 && s.as_bytes()[3].is_ascii_digit());
     ensure!(
         !reserved,
@@ -27,7 +25,6 @@ pub fn check_path_name(kind: &str, s: &str) -> Result<()> {
     Ok(())
 }
 
-/// Secret names become environment variable names.
 pub fn check_secret_name(s: &str) -> Result<()> {
     let first = s.bytes().next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_');
     let rest = s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
@@ -38,9 +35,6 @@ pub fn check_secret_name(s: &str) -> Result<()> {
     Ok(())
 }
 
-/// Windows environment variable names ignore case, so two names that differ only in case collapse
-/// into one in the child and either value may win. Refused on every platform so a vault behaves
-/// the same everywhere. The exact same name is not a clash: setting it again is an update.
 pub fn check_case_clash<'a>(existing: impl IntoIterator<Item = &'a str>, name: &str, place: &str) -> Result<()> {
     if let Some(other) = existing
         .into_iter()
@@ -53,7 +47,6 @@ pub fn check_case_clash<'a>(existing: impl IntoIterator<Item = &'a str>, name: &
     Ok(())
 }
 
-/// Environment variable values cannot hold NUL on any platform.
 pub fn check_secret_value(name: &str, v: &str) -> Result<()> {
     ensure!(
         !v.contains('\0'),
@@ -62,7 +55,6 @@ pub fn check_secret_value(name: &str, v: &str) -> Result<()> {
     Ok(())
 }
 
-/// Environments that hold production secrets, any name starting with `prod`, need --allow-prod to be read.
 pub fn is_prod(env: &str) -> bool {
     env.starts_with("prod")
 }
@@ -113,6 +105,77 @@ mod tests {
         }
         for env in ["dev", "staging", "test", "preprod"] {
             assert!(!is_prod(env), "{env} gated");
+        }
+    }
+
+    use proptest::prelude::*;
+    use proptest::test_runner::RngSeed;
+
+    fn seeded() -> ProptestConfig {
+        ProptestConfig {
+            cases: 256,
+            rng_seed: RngSeed::Fixed(2),
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        }
+    }
+
+    proptest! {
+        #![proptest_config(seeded())]
+
+        #[test]
+        fn path_names_are_accepted_exactly_when_they_fit_the_rule(
+            head in "[a-z0-9]",
+            tail in "[a-z0-9_-]{0,61}",
+            bad in "[^a-z0-9_-]",
+            at in any::<proptest::sample::Index>(),
+        ) {
+            let good = format!("{head}{tail}-x");
+            prop_assert!(check_path_name("project", &good).is_ok(), "{:?} refused", good);
+            let mut broken: Vec<char> = good.chars().collect();
+            broken.insert(at.index(broken.len() + 1), bad.chars().next().unwrap());
+            let broken: String = broken.into_iter().collect();
+            prop_assert!(check_path_name("project", &broken).is_err(), "{:?} accepted", broken);
+            let too_long = good.clone() + &"a".repeat(65 - good.len());
+            prop_assert!(check_path_name("project", &too_long).is_err());
+        }
+
+        #[test]
+        fn secret_names_are_accepted_exactly_when_they_fit_the_rule(
+            head in "[A-Za-z_]",
+            tail in "[A-Za-z0-9_]{0,40}",
+            bad in "[^A-Za-z0-9_]",
+            at in any::<proptest::sample::Index>(),
+        ) {
+            let good = format!("{head}{tail}");
+            prop_assert!(check_secret_name(&good).is_ok());
+            let mut broken: Vec<char> = good.chars().collect();
+            broken.insert(at.index(broken.len() + 1), bad.chars().next().unwrap());
+            let broken: String = broken.into_iter().collect();
+            prop_assert!(check_secret_name(&broken).is_err(), "{:?} accepted", broken);
+            let leading_digit = "9".to_owned() + &good;
+            prop_assert!(check_secret_name(&leading_digit).is_err());
+        }
+
+        #[test]
+        fn a_name_clashes_with_its_other_casings_but_never_with_itself(
+            name in "[A-Za-z_][A-Za-z0-9_]{0,20}",
+            flips in proptest::collection::vec(any::<bool>(), 21),
+            others in proptest::collection::vec("[A-Za-z_][A-Za-z0-9_]{0,20}", 0..5),
+        ) {
+            let recased: String = name
+                .chars()
+                .zip(&flips)
+                .map(|(c, flip)| if *flip { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() })
+                .collect();
+            let unrelated: Vec<&str> = others.iter().map(String::as_str).filter(|o| !o.eq_ignore_ascii_case(&name)).collect();
+            let mut existing = unrelated.clone();
+            existing.push(&name);
+            prop_assert!(check_case_clash(existing.iter().copied(), &name, "p/e").is_ok());
+            prop_assert!(check_case_clash(unrelated.iter().copied(), &recased, "p/e").is_ok());
+            prop_assert_eq!(check_case_clash(existing.iter().copied(), &recased, "p/e").is_err(), recased != name);
+            existing.reverse();
+            prop_assert_eq!(check_case_clash(existing.iter().copied(), &recased, "p/e").is_err(), recased != name);
         }
     }
 }

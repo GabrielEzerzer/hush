@@ -1,4 +1,4 @@
-"""Native, offline acceptance tests. Only the Python standard library is used."""
+# Native, offline acceptance tests. Only the Python standard library is used.
 
 import argparse
 import contextlib
@@ -23,11 +23,11 @@ SCENARIOS = []
 
 
 class Failure(Exception):
-    """Only controlled, value-free messages may reach the console."""
+    pass
 
 
 class Skip(Exception):
-    """A scenario needs an optional input that was not supplied."""
+    pass
 
 
 def require(condition, message):
@@ -47,7 +47,6 @@ def digest(value):
 
 
 def clean_environment():
-    # Case-insensitive removal also handles unusual Windows variable casing.
     return {
         k: v for k, v in os.environ.items()
         if k.upper() not in {"CLAUDECODE", "HUSH_PROJECT", "HUSH_ENV", "HUSH_HOME", "HUSH_KEY"}
@@ -56,7 +55,6 @@ def clean_environment():
 
 
 def hush_processes():
-    """Use Toolhelp, not tasklist/PowerShell or a background service."""
     require(os.name == "nt", "this scenario requires native Windows")
     import ctypes
     from ctypes import wintypes
@@ -129,7 +127,6 @@ class Sandbox:
         child_env = self.env.copy()
         if env:
             child_env.update(env)
-        # Every subprocess that could launch hush gets these safety settings.
         require(child_env.get("HUSH_HOME") == str(self.home), "unsafe vault override")
         require(child_env.get("HUSH_KEY") == KEY, "unsafe key override")
         options = {}
@@ -202,7 +199,6 @@ class Sandbox:
         return path
 
     def route_file(self, name, path, *, agent=False):
-        # The actual open file is stdin, exactly the semantics of `hush set NAME < file`.
         with path.open("rb") as source:
             self.ok(self.hush("set", name, stdin=source,
                               env={"CLAUDECODE": "1"} if agent else None), "private-file intake")
@@ -302,7 +298,7 @@ class Sandbox:
                 require(Path(cwd).resolve() == repo, "project creation escaped its temp repo")
                 self.git(*args[1:], cwd=repo)
             elif args[:2] == ["git", "commit"]:
-                pass  # Keep the real index staged so the caller can inspect it.
+                pass
             elif args[:3] == [str(t3), "project", "add"]:
                 require(args[3] == repo.as_posix(), "T3 stub received the wrong repo")
             else:
@@ -319,7 +315,6 @@ class Sandbox:
             try:
                 module.main()
             except SystemExit:
-                # SystemExit is not an Exception, so it would end the run with no SCORE line.
                 raise Failure("new-project main exited early") from None
         self.no_values(captured.getvalue().encode(), "new-project main output")
         require(any(c[:3] == [str(t3), "project", "add"] for c in calls), "T3 stub was not exercised")
@@ -334,7 +329,6 @@ class Sandbox:
             empty.mkdir(exist_ok=True)
             child_env["PATH"] = str(empty)
         captured = io.StringIO()
-        # Real import + real helper + real binary; only environment and output are scoped.
         with patch.dict(os.environ, child_env, clear=True), contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
             files = linker(path or self.repo, slug)
         self.no_values(captured.getvalue().encode(), "new-project output")
@@ -372,7 +366,6 @@ def main():
     binary_name = "hush.exe" if os.name == "nt" else "hush"
     if args.hush and args.hush.name != binary_name:
         parser.error("--hush binary must be named " + binary_name + " so PATH uses the same executable")
-    # Alias prevents duplicate module globals when evals import this script.
     sys.modules["acceptance"] = sys.modules[__name__]
     for path in sorted((ROOT / "harness" / "evals" / args.set).glob("*.py")):
         spec = importlib.util.spec_from_file_location("eval_" + args.set + "_" + path.stem, path)
@@ -410,7 +403,6 @@ def main():
             except Failure as error:
                 failure = str(error)
             except Exception as error:
-                # No subprocess output, exception args, or tracebacks: they may contain values.
                 failure = "unexpected " + type(error).__name__ + " (details withheld to protect values)"
             finally:
                 if box is not None:

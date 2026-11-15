@@ -1,0 +1,197 @@
+id: hush-pure-modules-do-no-io
+language: Rust
+severity: error
+message: "src/crypto.rs, src/names.rs and src/style.rs are pure: no files, processes, environment, threads, network, terminal or prompts. Take the data as an argument and do the I/O in vault.rs, config.rs, run.rs or main.rs."
+files:
+  - src/crypto.rs
+  - src/names.rs
+  - src/style.rs
+rule:
+  any:
+    - kind: use_declaration
+      regex: '\bstd::(?:\{[^}]*\b)?(?:fs|io|net|process|env|thread|os)\b'
+    - all:
+        - any:
+            - kind: scoped_identifier
+            - kind: scoped_type_identifier
+        - regex: '^(?:::)?std::(?:fs|io|net|process|env|thread|os)\b'
+        - not:
+            inside:
+              stopBy: end
+              any:
+                - kind: use_declaration
+                - kind: scoped_identifier
+                - kind: scoped_type_identifier
+    - kind: identifier
+      regex: '^(?:dirs|keyring|which|tempfile|rpassword|anstream|ctrlc|dotenvy)$'
+      inside:
+        any:
+          - kind: scoped_identifier
+          - kind: scoped_type_identifier
+          - kind: scoped_use_list
+          - kind: use_declaration
+---
+id: hush-leaf-modules-import-nothing-from-the-crate
+language: Rust
+severity: error
+message: "src/crypto.rs, src/names.rs, src/style.rs and src/config.rs are leaf modules and import nothing from the crate. Move the shared code down into one of them, or make the call from vault.rs or main.rs."
+files:
+  - src/crypto.rs
+  - src/names.rs
+  - src/style.rs
+  - src/config.rs
+rule:
+  kind: crate
+  not:
+    inside:
+      kind: visibility_modifier
+---
+id: hush-vault-imports-only-crypto-and-names
+language: Rust
+severity: error
+message: "src/vault.rs sits on crypto.rs and names.rs only. It must not reach up into run.rs, config.rs, style.rs or main.rs; return the data and let main.rs combine them."
+files:
+  - src/vault.rs
+rule:
+  any:
+    - kind: scoped_identifier
+      has:
+        field: path
+        kind: crate
+      not:
+        regex: '^crate::(?:crypto|names)$'
+    - any:
+        - kind: identifier
+        - kind: scoped_identifier
+      not:
+        regex: '^(?:crypto|names|self)\b'
+      inside:
+        kind: use_list
+        inside:
+          kind: scoped_use_list
+          has:
+            field: path
+            kind: crate
+---
+id: hush-run-imports-only-vault
+language: Rust
+severity: error
+message: "src/run.rs gets plaintext secrets from vault.rs and nothing else from the crate. Never decrypt, validate names or read hush.toml here; do that in main.rs and pass the result in."
+files:
+  - src/run.rs
+rule:
+  any:
+    - kind: scoped_identifier
+      has:
+        field: path
+        kind: crate
+      not:
+        regex: '^crate::vault$'
+    - any:
+        - kind: identifier
+        - kind: scoped_identifier
+      not:
+        regex: '^(?:vault|self)\b'
+      inside:
+        kind: use_list
+        inside:
+          kind: scoped_use_list
+          has:
+            field: path
+            kind: crate
+---
+id: hush-only-crypto-touches-the-cipher
+language: Rust
+severity: error
+message: "Only src/crypto.rs uses the cipher, hashes and the random generator. Call crypto::seal, crypto::open, crypto::new_key or crypto::key_id instead."
+files:
+  - "src/**/*.rs"
+  - "tests/**/*.rs"
+ignores:
+  - src/crypto.rs
+rule:
+  kind: identifier
+  regex: '^(?:chacha20poly1305|sha2|rand|rand_core|getrandom)$'
+  inside:
+    any:
+      - kind: scoped_identifier
+      - kind: scoped_type_identifier
+      - kind: scoped_use_list
+      - kind: use_declaration
+---
+id: hush-only-vault-touches-the-keychain
+language: Rust
+severity: error
+message: "Only src/vault.rs opens the OS keychain and finds the vault folder. Go through vault::home, vault::Vault or vault::setup instead."
+files:
+  - "src/**/*.rs"
+ignores:
+  - src/vault.rs
+rule:
+  kind: identifier
+  regex: '^(?:keyring|dirs)$'
+  inside:
+    any:
+      - kind: scoped_identifier
+      - kind: scoped_type_identifier
+      - kind: scoped_use_list
+      - kind: use_declaration
+---
+id: hush-only-main-talks-to-the-user
+language: Rust
+severity: error
+message: "Only src/main.rs prints and prompts. Return a value, or an error with context, and let main.rs show it."
+files:
+  - "src/**/*.rs"
+ignores:
+  - src/main.rs
+rule:
+  any:
+    - kind: macro_invocation
+      has:
+        field: macro
+        regex: '^(?:e?print(?:ln)?|dbg)$'
+    - kind: identifier
+      regex: '^(?:anstream|rpassword)$'
+      inside:
+        any:
+          - kind: scoped_identifier
+          - kind: scoped_type_identifier
+          - kind: scoped_use_list
+          - kind: use_declaration
+---
+id: hush-clap-stays-in-the-cli
+language: Rust
+severity: error
+message: "Only src/main.rs parses the command line, and only src/style.rs builds clap's colours. Take plain arguments in this module and let main.rs map the flags onto them."
+files:
+  - "src/**/*.rs"
+ignores:
+  - src/main.rs
+  - src/style.rs
+rule:
+  kind: identifier
+  regex: '^clap$'
+  inside:
+    any:
+      - kind: scoped_identifier
+      - kind: scoped_type_identifier
+      - kind: scoped_use_list
+      - kind: use_declaration
+---
+id: hush-harness-evals-stay-independent
+language: Python
+severity: error
+message: "harness/acceptance.py loads the eval files by path at run time, and the dev and test sets share only its helpers. Import helpers from acceptance; never import an eval module or console_delete."
+files:
+  - "harness/**/*.py"
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: name
+        regex: '^(?:harness|evals|behaviors|acceptance_cases|console_delete|eval_\w+)\b'
+    - kind: import_from_statement
+      has:
+        field: module_name
+        regex: '^(?:harness|evals|behaviors|acceptance_cases|console_delete|eval_\w+)\b'

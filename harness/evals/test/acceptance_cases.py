@@ -1,4 +1,4 @@
-"""Frozen second check: different data, process shapes, and combined edge cases."""
+# Frozen second check: different data, process shapes, and combined edge cases.
 
 import json
 import os
@@ -188,7 +188,6 @@ def no_service(s):
     empty = s.root / "support bin"
     empty.mkdir()
     minimal = str(s.binary.parent) + os.pathsep + str(empty)
-    # Fixture precondition, not a claim about hush behavior or installed machine tools.
     for tool in ("docker.exe", "wsl.exe", "podman.exe"):
         require(shutil.which(tool, path=minimal) is None, "precondition: container executable present in allowlisted PATH")
     env = {"PATH": minimal}

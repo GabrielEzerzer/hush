@@ -82,10 +82,17 @@ other users' or existing hush processes.
 
 Recovery-key mode gives hush real console input and output with `CLAUDECODE=1`.
 It reads the hidden console screen and checks stderr for the fixed test key,
-requires the AI-agent refusal, and emits only a value-free marker. This makes
+ignoring dashes and whitespace because the key prints in dashed groups and the
+screen can wrap it, requires the AI-agent refusal, and emits only a value-free
+marker. This makes
 the test sensitive to removal of the agent guard even though a TTY guard remains.
 The dev set also covers installed hush before setup, positional-value refusal,
-and secret lookup from a descendant of a linked worktree.
+and secret lookup from a descendant of a linked worktree. The positional-value
+case passes a public marker rather than a generated value, because clap may echo
+a rejected argument.
+
+`acceptance.py` registers itself as the module `acceptance` before loading the
+eval files, so evals that import it share one copy of its globals.
 
 Limits: disk and history scans prove the fake values are absent after the
 workflow; they do not inspect RAM, paging, crash dumps, OS telemetry, or recover

@@ -1,0 +1,140 @@
+[
+  {
+    "name": "Create the vault",
+    "description": "Creates the vault folder and a random key kept in the OS keychain, or checks an existing vault against its key.",
+    "command": "hush setup",
+    "inputs": ["HUSH_HOME (optional vault folder)", "HUSH_KEY (optional key instead of the keychain)"],
+    "outputs": ["vault folder with vault.toml", "key in the OS keychain", "recovery key, when run in a terminal"],
+    "test": "tests/cli.rs::setup_is_idempotent_and_rejects_a_different_key"
+  },
+  {
+    "name": "Restore the key on a new machine",
+    "description": "Reads the recovery key from a hidden prompt and puts it in this machine's keychain.",
+    "command": "hush setup --recover",
+    "inputs": ["recovery key typed at a hidden prompt"],
+    "outputs": ["key in the OS keychain"],
+    "test": "none",
+    "issue": 16
+  },
+  {
+    "name": "Show the recovery key",
+    "description": "Prints the vault key in its recovery form, only in an interactive terminal.",
+    "command": "hush recovery-key",
+    "inputs": ["key from the OS keychain or HUSH_KEY"],
+    "outputs": ["recovery key on stdout"],
+    "test": "none",
+    "issue": 16
+  },
+  {
+    "name": "Link a repo to a project",
+    "description": "Writes hush.toml, creates the project in the vault and adds .env patterns to .gitignore.",
+    "command": "hush init [name]",
+    "inputs": ["project name, or the repo's folder name"],
+    "outputs": ["hush.toml", "project folder in the vault", ".gitignore entries"],
+    "test": "tests/cli.rs::init_links_the_repo_and_creates_the_project"
+  },
+  {
+    "name": "List projects",
+    "description": "Lists every project and the environments that hold secrets.",
+    "command": "hush project list",
+    "inputs": ["the vault"],
+    "outputs": ["project names and environment names on stdout"],
+    "test": "tests/cli.rs::set_get_list_rm"
+  },
+  {
+    "name": "Create a project",
+    "description": "Creates an empty project in the vault without linking a repo.",
+    "command": "hush project create <name>",
+    "inputs": ["project name"],
+    "outputs": ["project folder in the vault"],
+    "test": "tests/cli.rs::files_moved_between_environments_or_projects_are_rejected"
+  },
+  {
+    "name": "Delete a project",
+    "description": "Deletes a project and all its secrets after the user types its name in a terminal.",
+    "command": "hush project delete <name>",
+    "inputs": ["project name", "the same name typed at the prompt"],
+    "outputs": ["project folder removed from the vault"],
+    "test": "harness/evals/dev/behaviors.py::delete_real_console"
+  },
+  {
+    "name": "Store a secret",
+    "description": "Stores one value, read from a hidden prompt or from stdin, never from the command line.",
+    "command": "hush set NAME",
+    "inputs": ["secret name", "value from a hidden prompt or stdin"],
+    "outputs": ["encrypted environment file in the vault"],
+    "test": "tests/cli.rs::set_get_list_rm"
+  },
+  {
+    "name": "Print a secret",
+    "description": "Prints one value, with no trailing newline when piped.",
+    "command": "hush get NAME",
+    "inputs": ["secret name"],
+    "outputs": ["value on stdout"],
+    "test": "tests/cli.rs::piped_get_prints_the_value_with_no_trailing_newline"
+  },
+  {
+    "name": "List secret names",
+    "description": "Lists the names in an environment, never the values.",
+    "command": "hush list",
+    "inputs": ["project and environment"],
+    "outputs": ["secret names on stdout"],
+    "test": "tests/cli.rs::set_get_list_rm"
+  },
+  {
+    "name": "Remove a secret",
+    "description": "Removes one secret from an environment.",
+    "command": "hush rm NAME",
+    "inputs": ["secret name"],
+    "outputs": ["environment file without that secret"],
+    "test": "tests/cli.rs::set_get_list_rm"
+  },
+  {
+    "name": "Import a .env file",
+    "description": "Copies every variable in a .env file into the vault, refusing the whole file on any error.",
+    "command": "hush import FILE",
+    "inputs": [".env file"],
+    "outputs": ["encrypted environment file in the vault", "count of new and replaced secrets"],
+    "test": "tests/cli.rs::import_reads_dotenv_rules_and_export_round_trips"
+  },
+  {
+    "name": "Export secrets",
+    "description": "Prints every secret in an environment as dotenv lines or JSON.",
+    "command": "hush export --format json",
+    "inputs": ["project and environment", "format: dotenv (default) or json"],
+    "outputs": ["every name and value on stdout"],
+    "test": "tests/cli.rs::property_export_then_import_round_trips_any_values"
+  },
+  {
+    "name": "Run an app with its secrets",
+    "description": "Starts a command with the environment's secrets added to its environment and passes its exit code back.",
+    "command": "hush run -- CMD...",
+    "inputs": ["command and its arguments", "project and environment"],
+    "outputs": ["the command's own output and exit code"],
+    "test": "tests/cli.rs::run_injects_secrets_and_passes_the_exit_code_through"
+  },
+  {
+    "name": "Choose the project and environment",
+    "description": "Picks the vault project and environment for any command, overriding hush.toml and the dev default.",
+    "command": "hush --project NAME --env ENV list",
+    "inputs": ["--project or HUSH_PROJECT", "--env or HUSH_ENV"],
+    "outputs": ["the command runs against that project and environment"],
+    "test": "tests/cli.rs::init_ignores_hush_project_from_the_environment"
+  },
+  {
+    "name": "Read production secrets",
+    "description": "Reads an environment whose name starts with prod, which every reading command refuses without the flag.",
+    "command": "hush --allow-prod --env prod get NAME",
+    "inputs": ["--allow-prod", "an environment named prod..."],
+    "outputs": ["the production value"],
+    "test": "tests/cli.rs::production_environments_need_allow_prod_to_be_read"
+  },
+  {
+    "name": "Refuse to reveal values to an AI agent",
+    "description": "When CLAUDECODE is set, refuses get, export, recovery-key and --allow-prod so values never reach the agent.",
+    "command": "CLAUDECODE=1 hush get NAME",
+    "inputs": ["CLAUDECODE set to a non-empty value"],
+    "outputs": ["an error and exit code 1, with no value printed"],
+    "test": "tests/cli.rs::an_agent_shell_cannot_print_values_or_unlock_prod"
+  }
+]

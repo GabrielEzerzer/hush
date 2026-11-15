@@ -93,6 +93,8 @@ Any program works the same way: `hush run -- python main.py`, `hush run -- cargo
 
 Every command takes `-p/--project` (default: the project in `hush.toml`) and `-e/--env` (default: `dev`). `HUSH_PROJECT` and `HUSH_ENV` set the same things. `hush init` is the exception: it ignores `HUSH_PROJECT`, so a value left over from another repo can't link this one to the wrong project. Pass the name, as in `hush init NAME` or `hush init -p NAME`.
 
+Without a name, `hush init` uses the main checkout's folder name in lowercase, so running it in a worktree such as `web-app-fix-x` still picks `web-app`. In a subfolder such as `app/` it gives that app its own project, `web-app-app`.
+
 To pipe a value in, for example from a script: `printf '%s' "$VALUE" | hush set NAME`. One trailing newline (or CRLF) is removed. An empty value is refused and the stored secret stays as it was.
 
 Secret names that differ only in case, such as `db_url` and `DB_URL`, are refused in one environment, because Windows treats them as one variable.
@@ -149,7 +151,11 @@ For hosted apps such as Vercel, the platform keeps its own copy of the productio
 cargo test                    # unit tests and end-to-end tests against the built binary
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
+python setup/lint/ratchet     # no code comments, and the module layering in setup/lint/rules/hush-layers.yml
+python -m unittest discover -s setup/lint/tests
 ```
+
+The lint needs [ast-grep](https://ast-grep.github.io) 0.51.1 on `PATH` (`pip install ast-grep-cli==0.51.1`); see [setup/lint/README.md](setup/lint/README.md). `features.json` lists every command, and `cargo test` fails when a command or flag is missing from it.
 
 The tests give every case its own vault in a temp folder and a fixed `HUSH_KEY`, so they never touch the real keychain or the real vault. `harness/` holds a slower Windows acceptance suite; see [harness/README.md](harness/README.md).
 
