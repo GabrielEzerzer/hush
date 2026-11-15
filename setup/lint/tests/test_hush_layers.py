@@ -29,6 +29,11 @@ class Layers(unittest.TestCase):
             "src/vault.rs": "use std::fs;\nfn f() { let _ = std::env::var(\"X\"); }\n",
         })
         self.check(rule, {"src/names.rs": "fn f() { let _ = tempfile::tempdir(); }\n"}, {})
+        for name, text in [("src/names.rs", "use tempfile::*;\n"), ("src/style.rs", "use which as w;\n"),
+                           ("src/crypto.rs", "extern crate dotenvy;\n"), ("src/crypto.rs", "use std::*;\n"),
+                           ("src/names.rs", "use std as s;\n"), ("src/style.rs", "use std::{self as s};\n")]:
+            self.check(rule, {name: text}, {})
+        self.check(rule, {}, {"src/crypto.rs": "use std::collections::*;\nuse std::fmt::{self, Write as _};\n"})
 
     def test_leaf_modules_import_nothing_from_the_crate(self):
         self.check("hush-leaf-modules-import-nothing-from-the-crate", {
@@ -37,6 +42,15 @@ class Layers(unittest.TestCase):
         }, {
             "src/config.rs": "pub(crate) fn f() {}\n",
             "src/main.rs": "use crate::vault::Secrets;\n",
+        })
+        self.check("hush-leaf-modules-import-nothing-from-the-crate", {
+            "src/crypto.rs": "use super::names;\n",
+            "src/config.rs": "fn f() { super::vault::home(); }\n",
+            "src/names.rs": "mod tests { use super::super::vault; }\n",
+        }, {
+            "src/crypto.rs": "mod tests { use super::*; }\n",
+            "src/config.rs": "pub(super) fn f() {}\n",
+            "src/names.rs": "extern crate core;\n",
         })
 
     def test_vault_imports_only_crypto_and_names(self):
@@ -48,6 +62,14 @@ class Layers(unittest.TestCase):
         self.check("hush-vault-imports-only-crypto-and-names", {
             "src/vault.rs": "use crate::{crypto, config};\n",
         }, {"src/vault.rs": "use crate::{crypto, names};\n"})
+        for text in ["use super::run;\n", "fn f() { super::config::load(); }\n", "use crate::*;\n",
+                     "fn f() -> crate::Cli { todo!() }\n", "use crate::{crypto, config as c};\n",
+                     "use crate::{names, run::*};\n", "mod keychain { use super::super::run; }\n",
+                     "use crate as c;\n", "use crate::{self as c};\n"]:
+            self.check("hush-vault-imports-only-crypto-and-names", {"src/vault.rs": text}, {})
+        for text in ["use super::crypto::{self, MasterKey};\n", "mod tests { use super::*; }\n",
+                     "mod keychain { use super::*; fn f() -> crate::crypto::MasterKey { todo!() } }\n"]:
+            self.check("hush-vault-imports-only-crypto-and-names", {}, {"src/vault.rs": text})
 
     def test_run_imports_only_vault(self):
         self.check("hush-run-imports-only-vault", {
@@ -55,6 +77,11 @@ class Layers(unittest.TestCase):
         }, {
             "src/run.rs": "use crate::vault::Secrets;\n",
         })
+        for text in ["use super::crypto;\n", "fn f() { super::crypto::new_key(); }\n", "use crate::*;\n",
+                     "use super as s;\n"]:
+            self.check("hush-run-imports-only-vault", {"src/run.rs": text}, {})
+        for text in ["use super::vault::Secrets;\n", "use crate::{self, vault as v};\n"]:
+            self.check("hush-run-imports-only-vault", {}, {"src/run.rs": text})
 
     def test_only_crypto_touches_the_cipher(self):
         self.check("hush-only-crypto-touches-the-cipher", {
@@ -63,6 +90,8 @@ class Layers(unittest.TestCase):
         }, {
             "src/crypto.rs": "use sha2::{Digest, Sha256};\nuse chacha20poly1305::aead::OsRng;\n",
         })
+        for text in ["use sha2::*;\n", "use chacha20poly1305 as c;\n", "extern crate sha2 as s;\n", "use {rand};\n"]:
+            self.check("hush-only-crypto-touches-the-cipher", {"src/main.rs": text}, {})
 
     def test_only_vault_touches_the_keychain(self):
         self.check("hush-only-vault-touches-the-keychain", {
@@ -70,6 +99,8 @@ class Layers(unittest.TestCase):
         }, {
             "src/vault.rs": "fn f() { let _ = keyring::Entry::new(\"a\", \"b\"); let _ = dirs::data_dir(); }\n",
         })
+        for text in ["use keyring::*;\n", "use keyring as k;\n", "use dirs::*;\n"]:
+            self.check("hush-only-vault-touches-the-keychain", {"src/main.rs": text}, {})
 
     def test_only_main_talks_to_the_user(self):
         self.check("hush-only-main-talks-to-the-user", {
@@ -79,10 +110,22 @@ class Layers(unittest.TestCase):
             "src/main.rs": "fn f() { eprintln!(\"x\"); }\n",
             "src/vault.rs": "fn f() -> String { format!(\"x\") }\n",
         })
+        self.check("hush-only-main-talks-to-the-user", {
+            "src/vault.rs": "use std::io::Write;\nfn f() { std::io::stderr().write_all(b\"x\").unwrap(); }\n",
+            "src/run.rs": "use std::io::{self, Write};\nfn f() { writeln!(io::stdout(), \"x\").unwrap(); }\n",
+            "src/config.rs": "use std::io::{stdin as input, Read};\n",
+        }, {
+            "src/run.rs": "use std::process::{Command, Stdio};\n"
+                          "fn f(c: &mut Command) { c.stdin(Stdio::null()).stdout(Stdio::inherit()).stderr(Stdio::piped()); }\n",
+            "src/config.rs": "fn f(out: std::process::Output) -> anyhow::Result<()> "
+                             "{ anyhow::bail!(\"{}\", String::from_utf8_lossy(&out.stderr)) }\n",
+        })
+        self.check("hush-only-main-talks-to-the-user", {"src/run.rs": "use anstream::*;\n"}, {})
 
     def test_clap_stays_in_the_cli(self):
         self.check("hush-clap-stays-in-the-cli", {
             "src/vault.rs": "use clap::Parser;\n",
+            "src/run.rs": "use clap::*;\n",
         }, {
             "src/main.rs": "use clap::Parser;\n",
             "src/style.rs": "pub fn clap() -> clap::builder::Styles { clap::builder::Styles::styled() }\n",

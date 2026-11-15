@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, TestRunner};
+use proptest::test_runner::{Config, RngSeed, TestRunner};
 use tempfile::TempDir;
 
 const KEY_A: &str = "00112233-44556677-8899aabb-ccddeeff-00112233-44556677-8899aabb-ccddeeff";
@@ -760,7 +760,11 @@ fn piped_get_prints_the_value_with_no_trailing_newline() {
     env.set(&["PLAIN"], "abc123");
     env.set(&["SPACED"], "ends with a space ");
     assert_eq!(env.hush(&["get", "PLAIN"]).ok().out.stdout, b"abc123");
-    assert_eq!(env.hush(&["get", "SPACED"]).ok().out.stdout, b"ends with a space ");
+    assert_eq!(
+        env.hush(&["get", "SPACED"]).ok().out.stdout,
+        b"ends with a space ",
+        "compare raw bytes: the value ends in a space, which a trimming helper would hide"
+    );
 }
 
 fn value_strategy() -> impl Strategy<Value = String> {
@@ -772,6 +776,8 @@ fn property_set_get_round_trips_any_value() {
     let env = Env::with_project("demo");
     let mut runner = TestRunner::new(Config {
         cases: 40,
+        rng_seed: RngSeed::Fixed(5),
+        failure_persistence: None,
         ..Config::default()
     });
     runner
@@ -788,6 +794,8 @@ fn property_export_then_import_round_trips_any_values() {
     let env = Env::with_project("demo");
     let mut runner = TestRunner::new(Config {
         cases: 40,
+        rng_seed: RngSeed::Fixed(6),
+        failure_persistence: None,
         ..Config::default()
     });
     let maps = proptest::collection::btree_map("[A-Z_][A-Z0-9_]{0,8}", value_strategy(), 1..5);

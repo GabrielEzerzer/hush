@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 const HELP_TIMEOUT: Duration = Duration::from_secs(20);
+const KEY: &str = "00112233-44556677-8899aabb-ccddeeff-00112233-44556677-8899aabb-ccddeeff";
 const FLAGS_WITH_VALUES: &[&str] = &["-p", "--project", "-e", "--env", "--format"];
 const FIELDS: &[&str] = &["name", "description", "command", "inputs", "outputs", "test"];
 
@@ -35,7 +36,7 @@ fn help(args: &[&str]) -> String {
         .env("HUSH_HOME", home.path().join("vault"))
         .env_remove("HUSH_PROJECT")
         .env_remove("HUSH_ENV")
-        .env_remove("HUSH_KEY")
+        .env("HUSH_KEY", KEY)
         .env_remove("CLAUDECODE")
         .stdin(Stdio::null())
         .stdout(fs::File::create(&out_path).unwrap())

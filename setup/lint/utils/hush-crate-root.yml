@@ -1,0 +1,23 @@
+id: hush-crate-root
+language: Rust
+rule:
+  not:
+    inside:
+      any:
+        - kind: visibility_modifier
+        - kind: extern_crate_declaration
+  any:
+    - kind: crate
+    - kind: super
+      not:
+        inside:
+          kind: mod_item
+          stopBy: end
+    - kind: scoped_identifier
+      all:
+        - has:
+            field: path
+            kind: super
+        - has:
+            field: name
+            kind: super

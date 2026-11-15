@@ -1,0 +1,13 @@
+id: hush-path-segment
+language: Rust
+rule:
+  kind: identifier
+  any:
+    - inside:
+        any:
+          - kind: scoped_identifier
+          - kind: scoped_type_identifier
+          - kind: extern_crate_declaration
+    - inside:
+        kind: use_declaration
+        stopBy: end

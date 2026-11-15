@@ -1,6 +1,6 @@
-//! Terminal colours after the Codex CLI style guide: bold headers, dim secondary text, cyan for names the user acts
-//! on, green for success, red for errors, magenta for the brand, in ANSI named colours. anstream drops the codes
-//! unless the stream is a terminal and NO_COLOR is unset. Secret values never pass through here.
+//! Codex CLI colours, ANSI named only so the terminal theme picks the shades: bold headers, dim secondary text, cyan
+//! for names the user acts on, green for success, red for errors, magenta for the brand. anstream drops the codes off
+//! a terminal or under NO_COLOR and turns on VT processing in Windows consoles. Secret values never pass through here.
 
 use anstyle::{AnsiColor, Style};
 

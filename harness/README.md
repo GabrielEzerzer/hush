@@ -48,6 +48,8 @@ leaves the index staged instead of committing, and intercepts T3. It refuses
 other commands. Both sets assert that the hush vault project exists and both
 link files are staged; the held-out case uses custom note metadata and a note
 path containing spaces. No real GitHub, T3, or personal-vault action runs.
+A `SystemExit` from `main` is caught and reported as a failure: it is not an
+`Exception`, so letting it through would end the run with no SCORE line.
 
 There are 31 development scenarios and 14 held-out scenarios. Each scenario
 reports `PASS id: point N` or `FAIL id: point N: reason`; the last line is
@@ -59,7 +61,9 @@ should read the development set only.
 Every scenario has a fresh temporary vault and repo. Every command that can
 invoke hush receives that vault as `HUSH_HOME` and a fixed 64-hex test key as
 `HUSH_KEY`. `CLAUDECODE`, `HUSH_PROJECT`, and `HUSH_ENV` are removed from the
-inherited environment and added only by scenarios that exercise them. Git's
+inherited environment and added only by scenarios that exercise them. Names are
+compared in upper case, because Windows variable names come in any casing
+(`Hush_Key`). Git's
 inherited routing and global configuration are isolated too. The real
 Credential Manager and user vault are never needed. Temporary files and repos
 are removed even after a scenario fails.

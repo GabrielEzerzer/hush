@@ -9,7 +9,7 @@ files:
 rule:
   any:
     - kind: use_declaration
-      regex: '\bstd::(?:\{[^}]*\b)?(?:fs|io|net|process|env|thread|os)\b'
+      regex: '\bstd::(?:\{[^}]*)?(?:\b(?:fs|io|net|process|env|thread|os)\b|\*|\bself\s+as\b)|\bstd\s+as\b'
     - all:
         - any:
             - kind: scoped_identifier
@@ -22,14 +22,8 @@ rule:
                 - kind: use_declaration
                 - kind: scoped_identifier
                 - kind: scoped_type_identifier
-    - kind: identifier
+    - matches: hush-path-segment
       regex: '^(?:dirs|keyring|which|tempfile|rpassword|anstream|ctrlc|dotenvy)$'
-      inside:
-        any:
-          - kind: scoped_identifier
-          - kind: scoped_type_identifier
-          - kind: scoped_use_list
-          - kind: use_declaration
 ---
 id: hush-leaf-modules-import-nothing-from-the-crate
 language: Rust
@@ -41,10 +35,7 @@ files:
   - src/style.rs
   - src/config.rs
 rule:
-  kind: crate
-  not:
-    inside:
-      kind: visibility_modifier
+  matches: hush-crate-root
 ---
 id: hush-vault-imports-only-crypto-and-names
 language: Rust
@@ -54,24 +45,36 @@ files:
   - src/vault.rs
 rule:
   any:
-    - kind: scoped_identifier
+    - any:
+        - kind: scoped_identifier
+        - kind: scoped_type_identifier
       has:
         field: path
-        kind: crate
+        matches: hush-crate-root
       not:
-        regex: '^crate::(?:crypto|names)$'
+        has:
+          field: name
+          regex: '^(?:crypto|names)$'
+    - any:
+        - kind: use_wildcard
+        - kind: use_as_clause
+      has:
+        matches: hush-crate-root
     - any:
         - kind: identifier
         - kind: scoped_identifier
+        - kind: use_as_clause
+        - kind: use_wildcard
+        - kind: scoped_use_list
       not:
-        regex: '^(?:crypto|names|self)\b'
+        regex: '^(?:crypto|names)\b'
       inside:
         kind: use_list
         inside:
           kind: scoped_use_list
           has:
             field: path
-            kind: crate
+            matches: hush-crate-root
 ---
 id: hush-run-imports-only-vault
 language: Rust
@@ -81,24 +84,36 @@ files:
   - src/run.rs
 rule:
   any:
-    - kind: scoped_identifier
+    - any:
+        - kind: scoped_identifier
+        - kind: scoped_type_identifier
       has:
         field: path
-        kind: crate
+        matches: hush-crate-root
       not:
-        regex: '^crate::vault$'
+        has:
+          field: name
+          regex: '^vault$'
+    - any:
+        - kind: use_wildcard
+        - kind: use_as_clause
+      has:
+        matches: hush-crate-root
     - any:
         - kind: identifier
         - kind: scoped_identifier
+        - kind: use_as_clause
+        - kind: use_wildcard
+        - kind: scoped_use_list
       not:
-        regex: '^(?:vault|self)\b'
+        regex: '^vault\b'
       inside:
         kind: use_list
         inside:
           kind: scoped_use_list
           has:
             field: path
-            kind: crate
+            matches: hush-crate-root
 ---
 id: hush-only-crypto-touches-the-cipher
 language: Rust
@@ -110,14 +125,8 @@ files:
 ignores:
   - src/crypto.rs
 rule:
-  kind: identifier
+  matches: hush-path-segment
   regex: '^(?:chacha20poly1305|sha2|rand|rand_core|getrandom)$'
-  inside:
-    any:
-      - kind: scoped_identifier
-      - kind: scoped_type_identifier
-      - kind: scoped_use_list
-      - kind: use_declaration
 ---
 id: hush-only-vault-touches-the-keychain
 language: Rust
@@ -128,19 +137,13 @@ files:
 ignores:
   - src/vault.rs
 rule:
-  kind: identifier
+  matches: hush-path-segment
   regex: '^(?:keyring|dirs)$'
-  inside:
-    any:
-      - kind: scoped_identifier
-      - kind: scoped_type_identifier
-      - kind: scoped_use_list
-      - kind: use_declaration
 ---
 id: hush-only-main-talks-to-the-user
 language: Rust
 severity: error
-message: "Only src/main.rs prints and prompts. Return a value, or an error with context, and let main.rs show it."
+message: "Only src/main.rs prints, prompts or touches stdin, stdout and stderr. Return a value, or an error with context, and let main.rs show it."
 files:
   - "src/**/*.rs"
 ignores:
@@ -151,14 +154,10 @@ rule:
       has:
         field: macro
         regex: '^(?:e?print(?:ln)?|dbg)$'
-    - kind: identifier
-      regex: '^(?:anstream|rpassword)$'
-      inside:
-        any:
-          - kind: scoped_identifier
-          - kind: scoped_type_identifier
-          - kind: scoped_use_list
-          - kind: use_declaration
+    - kind: macro_invocation
+      regex: '::\s*(?:stdout|stderr|stdin)\b'
+    - matches: hush-path-segment
+      regex: '^(?:anstream|rpassword|stdout|stderr|stdin)$'
 ---
 id: hush-clap-stays-in-the-cli
 language: Rust
@@ -170,14 +169,8 @@ ignores:
   - src/main.rs
   - src/style.rs
 rule:
-  kind: identifier
+  matches: hush-path-segment
   regex: '^clap$'
-  inside:
-    any:
-      - kind: scoped_identifier
-      - kind: scoped_type_identifier
-      - kind: scoped_use_list
-      - kind: use_declaration
 ---
 id: hush-harness-evals-stay-independent
 language: Python
