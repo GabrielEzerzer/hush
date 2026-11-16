@@ -20,20 +20,38 @@ use crate::names::{check_case_clash, check_path_name, check_secret_name, check_s
 use crate::style::{ACCENT, BRAND, DIM, ERR, HEADER, OK, paint};
 use crate::vault::{Secrets, Vault};
 
-/// Per-project encrypted secrets, injected into apps at runtime.
 #[derive(Parser)]
-#[command(name = "hush", version, styles = style::clap())]
+#[command(
+    name = "hush",
+    version,
+    about = "Per-project encrypted secrets, injected into apps at runtime",
+    styles = style::clap()
+)]
 struct Cli {
-    /// Vault project [default: the `project` in the nearest hush.toml]
-    #[arg(short, long, global = true, env = "HUSH_PROJECT")]
+    #[arg(
+        short,
+        long,
+        global = true,
+        env = "HUSH_PROJECT",
+        help = "Vault project [default: the `project` in the nearest hush.toml]"
+    )]
     project: Option<String>,
 
-    /// Environment within the project
-    #[arg(short, long, global = true, env = "HUSH_ENV", default_value = "dev")]
+    #[arg(
+        short,
+        long,
+        global = true,
+        env = "HUSH_ENV",
+        default_value = "dev",
+        help = "Environment within the project"
+    )]
     env: String,
 
-    /// Allow reading an environment whose name starts with prod
-    #[arg(long, global = true)]
+    #[arg(
+        long,
+        global = true,
+        help = "Allow reading an environment whose name starts with prod"
+    )]
     allow_prod: bool,
 
     #[command(subcommand)]
@@ -42,39 +60,39 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create the vault and its key, stored in the OS keychain
+    #[command(about = "Create the vault and its key, stored in the OS keychain")]
     Setup {
-        /// Restore the key from its recovery form, for a new machine or a reset keychain
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Restore the key from its recovery form, for a new machine or a reset keychain"
+        )]
         recover: bool,
     },
-    /// Show the vault key's recovery form (terminal only)
+    #[command(about = "Show the vault key's recovery form (terminal only)")]
     RecoveryKey,
-    /// Link the current repo to a vault project: writes hush.toml and ignores .env files
+    #[command(about = "Link the current repo to a vault project: writes hush.toml and ignores .env files")]
     Init {
-        /// Project name [default: the repo's folder name]
+        #[arg(help = "Project name [default: the repo's folder name]")]
         name: Option<String>,
     },
-    /// List, create or delete projects
-    #[command(subcommand)]
+    #[command(subcommand, about = "List, create or delete projects")]
     Project(ProjectCmd),
-    /// Store a secret, reading the value from a hidden prompt or from stdin
+    #[command(about = "Store a secret, reading the value from a hidden prompt or from stdin")]
     Set { name: String },
-    /// Print a secret's value
+    #[command(about = "Print a secret's value")]
     Get { name: String },
-    /// List secret names, never values
-    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "ls", about = "List secret names, never values")]
     List,
-    /// Remove a secret
+    #[command(about = "Remove a secret")]
     Rm { name: String },
-    /// Copy every variable in a .env file into the vault
+    #[command(about = "Copy every variable in a .env file into the vault")]
     Import { file: PathBuf },
-    /// Print every secret, as dotenv lines or JSON
+    #[command(about = "Print every secret, as dotenv lines or JSON")]
     Export {
         #[arg(long, value_enum, default_value = "dotenv")]
         format: Format,
     },
-    /// Run a command with the secrets added to its environment: hush run -- npm run dev
+    #[command(about = "Run a command with the secrets added to its environment: hush run -- npm run dev")]
     Run {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<OsString>,
@@ -83,12 +101,11 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum ProjectCmd {
-    /// List projects and the environments that hold secrets
-    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "ls", about = "List projects and the environments that hold secrets")]
     List,
-    /// Create an empty project
+    #[command(about = "Create an empty project")]
     Create { name: String },
-    /// Delete a project and all its secrets (asks you to type its name)
+    #[command(about = "Delete a project and all its secrets (asks you to type its name)")]
     Delete { name: String },
 }
 
@@ -101,8 +118,6 @@ enum Format {
 fn main() -> ExitCode {
     let matches = Cli::command().get_matches();
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    // `hush init` links a repo for good, so it takes the project only from its arguments: a
-    // leftover HUSH_PROJECT must not link a new repo to another project.
     if let Cmd::Init { name } = &cli.cmd
         && matches.value_source("project") == Some(ValueSource::EnvVariable)
     {
@@ -201,7 +216,6 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             let value = secrets
                 .get(name)
                 .with_context(|| format!("no secret {name} in {project}/{env}"))?;
-            // A pipe gets the exact value: a trailing newline would end up in the receiving tool.
             let mut stdout = io::stdout().lock();
             stdout.write_all(value.as_bytes())?;
             if stdout.is_terminal() {
@@ -286,8 +300,6 @@ fn open(cli: &Cli, home: PathBuf) -> Result<(Vault, String, String)> {
     Ok((Vault::open(home)?, project, cli.env.clone()))
 }
 
-/// Claude Code sets CLAUDECODE in every shell it starts. Anything printed there goes into the
-/// model's context, so hush refuses to print values or unlock prod for it.
 fn refuse_agent(what: &str) -> Result<()> {
     if agent_shell() {
         bail!("hush does not {what} inside an AI agent's shell (CLAUDECODE is set); run it in your own terminal");
@@ -299,7 +311,6 @@ fn agent_shell() -> bool {
     std::env::var_os("CLAUDECODE").is_some_and(|v| !v.is_empty())
 }
 
-/// Setup prints a new recovery key only to a person at a terminal, never into an agent's shell.
 fn shows_recovery_key(terminal: bool, agent: bool) -> bool {
     terminal && !agent
 }
@@ -361,8 +372,6 @@ fn setup(home: PathBuf, recover: bool) -> Result<()> {
     Ok(())
 }
 
-/// Links the current folder. At the repo root that is the whole repo; in a subfolder such as
-/// `app/` it gives that app its own project, since hush uses the nearest hush.toml.
 fn init(home: &std::path::Path, name: Option<String>) -> Result<()> {
     vault::require_vault(home)?;
     let cwd = std::env::current_dir()?;
@@ -451,15 +460,12 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
     let (vault, project, env) = open(cli, home)?;
     let raw = Zeroizing::new(std::fs::read(file).with_context(|| format!("reading {}", file.display()))?);
     let text = std::str::from_utf8(&raw).map_err(|_| anyhow!("{} is not UTF-8 text", file.display()))?;
-    // Windows editors often save a UTF-8 byte order mark, which neither parser expects.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let entries = dotenv_entries(file, text)?;
     clear_env();
-    // A repeated key keeps its last value, as in dotenv, and counts once.
     let mut pairs = std::collections::BTreeMap::new();
     for (line, entry) in entries {
         for item in dotenvy::from_read_iter(entry.as_bytes()) {
-            // dotenvy's error text quotes the whole line, value included, so it never reaches the user.
             let Ok((k, v)) = item else {
                 bail!("{}: line {line} is not valid dotenv", file.display());
             };
@@ -496,24 +502,13 @@ fn import(cli: &Cli, home: PathBuf, file: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// dotenvy fills `$NAME` and `${NAME}` from the process environment. `dotenv_entries` refuses an
-/// unescaped `$` first, but it is a second parser that can disagree with dotenvy, so import empties
-/// the environment before parsing: whatever dotenvy expands finds nothing to copy. Everything
-/// import needs from the environment (HUSH_HOME, HUSH_KEY, HUSH_PROJECT, HUSH_ENV) is resolved
-/// by then.
 fn clear_env() {
     for (k, _) in std::env::vars_os() {
-        // SAFETY: hush starts no threads of its own before this point; the only one it ever starts
-        // is the ctrlc handler in `run`. On macOS the keychain call may leave system threads behind;
-        // they are not known to read the environment.
+        // SAFETY: hush starts no threads before this point; its only thread is the ctrlc handler in `run`.
         unsafe { std::env::remove_var(k) };
     }
 }
 
-/// Splits a dotenv file into entries that each start on a new line and end outside any quote,
-/// paired with the line each starts on. Refuses an unescaped `$` outside single quotes: dotenvy
-/// expands `$NAME` and `${NAME}` from hush's own environment, so a crafted file could copy
-/// HUSH_KEY or a shell token into a stored value.
 fn dotenv_entries<'a>(file: &std::path::Path, text: &'a str) -> Result<Vec<(usize, &'a str)>> {
     #[derive(PartialEq)]
     enum Quote {
@@ -578,7 +573,6 @@ fn dotenv_entries<'a>(file: &std::path::Path, text: &'a str) -> Result<Vec<(usiz
     Ok(out)
 }
 
-/// One dotenv line that dotenvy reads back as the same value.
 fn dotenv_line(name: &str, value: &str) -> Zeroizing<String> {
     let mut out = Zeroizing::new(String::with_capacity(name.len() + value.len() + 4));
     out.push_str(name);
@@ -606,5 +600,45 @@ mod tests {
         assert!(!shows_recovery_key(true, true), "printed into an agent's shell");
         assert!(!shows_recovery_key(false, false));
         assert!(!shows_recovery_key(false, true));
+    }
+
+    use proptest::prelude::*;
+    use proptest::test_runner::RngSeed;
+
+    fn seeded() -> ProptestConfig {
+        ProptestConfig {
+            cases: 256,
+            rng_seed: RngSeed::Fixed(4),
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        }
+    }
+
+    proptest! {
+        #![proptest_config(seeded())]
+
+        #[test]
+        fn an_exported_dotenv_line_imports_as_the_same_name_and_value(
+            name in "[A-Za-z_][A-Za-z0-9_]{0,20}",
+            value in "[^\u{0}]{0,40}",
+        ) {
+            let line = format!("{}\n", *dotenv_line(&name, &value));
+            let entries = dotenv_entries(std::path::Path::new("x.env"), &line).unwrap();
+            prop_assert_eq!(entries.len(), 1);
+            let parsed: Vec<(String, String)> =
+                dotenvy::from_read_iter(line.as_bytes()).collect::<Result<_, _>>().unwrap();
+            prop_assert_eq!(parsed, vec![(name, value)]);
+        }
+
+        #[test]
+        fn dotenv_entries_split_a_file_without_losing_or_repeating_bytes(text in "[a-z =#'\"\\\\\n\r]{0,80}") {
+            let entries = dotenv_entries(std::path::Path::new("x.env"), &text).unwrap();
+            let joined: String = entries.iter().map(|(_, entry)| *entry).collect();
+            prop_assert_eq!(&joined, &text);
+            for (line, entry) in &entries {
+                let start = entry.as_ptr() as usize - text.as_ptr() as usize;
+                prop_assert_eq!(*line, 1 + text[..start].matches('\n').count());
+            }
+        }
     }
 }

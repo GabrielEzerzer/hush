@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, TestRunner};
+use proptest::test_runner::{Config, RngSeed, TestRunner};
 use tempfile::TempDir;
 
 const KEY_A: &str = "00112233-44556677-8899aabb-ccddeeff-00112233-44556677-8899aabb-ccddeeff";
@@ -196,13 +196,16 @@ fn init_links_the_repo_and_creates_the_project() {
     env.hush(&["init", "other"]).fails().stderr_has("already links");
     assert_eq!(fs::read_to_string(env.repo.path().join(".gitignore")).unwrap(), ignore);
 
-    // A subfolder of the repo finds hush.toml by walking up.
     let sub = env.repo.path().join("apps").join("web");
     fs::create_dir_all(&sub).unwrap();
     env.set(&["A"], "1");
     let mut c = env.cmd(KEY_A);
     c.current_dir(&sub);
-    assert_eq!(env.run_with(c, &["list"], None).ok().stdout(), "A\n");
+    assert_eq!(
+        env.run_with(c, &["list"], None).ok().stdout(),
+        "A\n",
+        "a subfolder did not find hush.toml by walking up"
+    );
 }
 
 #[test]
@@ -414,8 +417,11 @@ fn production_environments_need_allow_prod_to_be_read() {
             .fails()
             .stderr_has("--allow-prod");
         assert_eq!(env.get(&["-e", prod, "--allow-prod", "SECRET"]), "live");
-        // Names only: listing a prod environment needs no flag.
-        assert_eq!(env.hush(&["-e", prod, "list"]).ok().stdout(), "SECRET\n");
+        assert_eq!(
+            env.hush(&["-e", prod, "list"]).ok().stdout(),
+            "SECRET\n",
+            "listing names in a prod environment needs no flag"
+        );
     }
     let mut c = env.cmd(KEY_A);
     c.env("HUSH_ENV", "prod");
@@ -454,11 +460,14 @@ fn run_injects_secrets_and_passes_the_exit_code_through() {
     let out = env.hush(&run_args(&print_var("HUSH_T"))).ok().stdout();
     assert_eq!(out.trim_end(), "from-vault");
 
-    // The vault value wins over a variable already set in the parent shell.
     let mut c = env.cmd(KEY_A);
     c.env("HUSH_T", "from-parent");
     let out = env.run_with(c, &run_args(&print_var("HUSH_T")), None).ok().stdout();
-    assert_eq!(out.trim_end(), "from-vault");
+    assert_eq!(
+        out.trim_end(),
+        "from-vault",
+        "the parent shell's value beat the vault's"
+    );
 
     let r = env.hush(&run_args(&exit_with(7))).fails();
     assert_eq!(r.out.status.code(), Some(7));
@@ -588,7 +597,6 @@ fn import_refuses_unescaped_dollar_and_writes_nothing() {
         assert!(!r.stderr().contains("8899aabb"), "{}", r.stderr());
         assert!(!env.file("demo", "dev").exists(), "{body:?} wrote the vault");
     }
-    // A '$' in a comment is never expanded, so it is allowed.
     fs::write(&src, "# costs $5\nA=1 # see $HOME\n").unwrap();
     env.hush(&["import", src.to_str().unwrap()])
         .ok()
@@ -624,14 +632,12 @@ fn names_that_differ_only_in_case_are_refused() {
         .stderr_has("DB_URL differs from db_url in demo/dev only by case");
     assert_eq!(fs::read(env.file("demo", "dev")).unwrap(), before);
 
-    // Two such names within one file, into an empty environment.
     fs::write(&src, "db_url=1\nDB_URL=2\n").unwrap();
     env.hush(&["-e", "fresh", "import", src.to_str().unwrap()])
         .fails()
         .stderr_has("DB_URL differs from db_url in");
     assert!(!env.file("demo", "fresh").exists());
 
-    // The exact same name is still an update, and another environment is separate.
     env.hush_in(&["set", "db_url"], "three\n")
         .ok()
         .stderr_has("Updated db_url");
@@ -739,11 +745,11 @@ fn an_agent_shell_cannot_print_values_or_unlock_prod() {
     agent(&["-e", "prod", "--allow-prod", "run", "--", "x"])
         .fails()
         .stderr_has("AI agent");
-    // Names, writes and dev runs stay available to agents.
     assert_eq!(
         agent(&["list"]).ok().stdout(),
         "A
-"
+",
+        "names stay available to agents"
     );
     agent(&run_args(&exit_with(0))).ok();
 }
@@ -751,17 +757,18 @@ fn an_agent_shell_cannot_print_values_or_unlock_prod() {
 #[test]
 fn piped_get_prints_the_value_with_no_trailing_newline() {
     let env = Env::with_project("demo");
-    // Compare raw bytes: the value ends in a space, which a trimming helper would hide.
     env.set(&["PLAIN"], "abc123");
     env.set(&["SPACED"], "ends with a space ");
     assert_eq!(env.hush(&["get", "PLAIN"]).ok().out.stdout, b"abc123");
-    assert_eq!(env.hush(&["get", "SPACED"]).ok().out.stdout, b"ends with a space ");
+    assert_eq!(
+        env.hush(&["get", "SPACED"]).ok().out.stdout,
+        b"ends with a space ",
+        "compare raw bytes: the value ends in a space, which a trimming helper would hide"
+    );
 }
 
 fn value_strategy() -> impl Strategy<Value = String> {
-    // Any non-empty text without NUL (`set` refuses an empty value). A value ending in CR loses
-    // it, since stdin input strips one CRLF.
-    "[^\u{0}]{1,40}".prop_filter("no trailing CR", |v| !v.ends_with('\r'))
+    "[^\u{0}]{1,40}".prop_filter("stdin input strips one trailing CRLF", |v| !v.ends_with('\r'))
 }
 
 #[test]
@@ -769,6 +776,8 @@ fn property_set_get_round_trips_any_value() {
     let env = Env::with_project("demo");
     let mut runner = TestRunner::new(Config {
         cases: 40,
+        rng_seed: RngSeed::Fixed(5),
+        failure_persistence: None,
         ..Config::default()
     });
     runner
@@ -785,6 +794,8 @@ fn property_export_then_import_round_trips_any_values() {
     let env = Env::with_project("demo");
     let mut runner = TestRunner::new(Config {
         cases: 40,
+        rng_seed: RngSeed::Fixed(6),
+        failure_persistence: None,
         ..Config::default()
     });
     let maps = proptest::collection::btree_map("[A-Z_][A-Z0-9_]{0,8}", value_strategy(), 1..5);
@@ -808,11 +819,6 @@ fn property_export_then_import_round_trips_any_values() {
 
 #[test]
 fn import_never_copies_the_environment_into_a_value() {
-    // hush's '$' scanner and dotenvy disagree here. The scanner reads `'\'` as a closed quote
-    // holding a backslash and the no-break space plus `#` as the start of a comment, so it passes
-    // the line. dotenvy's line splitter treats `\'` inside single quotes as an escape and so sees
-    // no comment, and its value parser expands `${...}`. The scanner is a friendly early error;
-    // what keeps the key out is that import empties its environment before parsing.
     let env = Env::with_project("demo");
     let src = env.repo.path().join(".env");
     fs::write(&src, "A='\\'\u{a0}#${HUSH_KEY}${HUSHTTOKEN}'\\'\n").unwrap();
@@ -823,7 +829,7 @@ fn import_never_copies_the_environment_into_a_value() {
     let value = &got["A"];
     assert!(
         !value.contains("8899aabb") && !value.contains("shell-token-5e2a"),
-        "the environment reached a stored value"
+        "the environment reached a stored value through a line the '$' scanner passes (issue #4)"
     );
     assert_eq!(value, "\\\u{a0}#\\");
 }
@@ -857,7 +863,6 @@ fn init_ignores_hush_project_from_the_environment() {
     assert!(toml.contains("project = \"myrepo\""), "{toml}");
     assert!(!env.hush(&["project", "list"]).ok().stdout().contains("leftover"));
 
-    // An explicit -p still names the project, before or after the subcommand.
     for (dir, args) in [
         ("a", &["-p", "named-a", "init"][..]),
         ("b", &["init", "--project", "named-b"]),
@@ -890,20 +895,23 @@ fn colour_reaches_only_a_terminal_and_never_a_value() {
     let env = Env::with_project("app");
     env.set(&["TOKEN"], "abc");
     let esc = |r: &Run| contains(&r.out.stdout, b"\x1b") || contains(&r.out.stderr, b"\x1b");
-    // Piped: plain, byte for byte.
     for args in [&["list"][..], &["project", "list"], &["get", "TOKEN"], &["rm", "NOPE"]] {
         assert!(!esc(&env.hush(args)), "escape codes in piped {args:?}");
     }
-    // CLICOLOR_FORCE proves the colouring exists; values stay plain even then.
     let mut forced = env.cmd(KEY_A);
     forced.env("CLICOLOR_FORCE", "1");
-    assert!(esc(&env.run_with(forced, &["list"], None).ok()));
+    assert!(
+        esc(&env.run_with(forced, &["list"], None).ok()),
+        "CLICOLOR_FORCE did not colour names"
+    );
     let mut forced = env.cmd(KEY_A);
     forced.env("CLICOLOR_FORCE", "1");
     let got = env.run_with(forced, &["get", "TOKEN"], None).ok();
-    assert_eq!(got.out.stdout, b"abc");
-    // NO_COLOR wins over CLICOLOR_FORCE.
+    assert_eq!(got.out.stdout, b"abc", "a value was coloured under CLICOLOR_FORCE");
     let mut off = env.cmd(KEY_A);
     off.env("CLICOLOR_FORCE", "1").env("NO_COLOR", "1");
-    assert!(!esc(&env.run_with(off, &["list"], None).ok()));
+    assert!(
+        !esc(&env.run_with(off, &["list"], None).ok()),
+        "NO_COLOR did not win over CLICOLOR_FORCE"
+    );
 }

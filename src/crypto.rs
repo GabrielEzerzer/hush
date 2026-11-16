@@ -1,8 +1,5 @@
-//! Sealing and opening vault files with XChaCha20-Poly1305.
-//!
-//! File layout: `HUSH1` magic, a 24-byte random nonce, then the ciphertext with its tag.
-//! The additional data names the project and environment, so a file copied over another
-//! project's or environment's file fails to open instead of silently serving the wrong secrets.
+//! Sealing and opening vault files with XChaCha20-Poly1305: `HUSH1`, a 24-byte random nonce, then ciphertext and tag.
+//! The additional data names the project and environment, so a file copied over another one fails to open.
 
 use anyhow::{Context, Result, bail, ensure};
 use chacha20poly1305::aead::rand_core::RngCore;
@@ -63,8 +60,6 @@ pub fn open(key: &MasterKey, aad: &str, data: &[u8]) -> Result<Zeroizing<Vec<u8>
     }
 }
 
-/// A short public fingerprint of the key, stored in vault.toml so a wrong key fails with a
-/// clear message before any file is touched.
 pub fn key_id(key: &MasterKey) -> String {
     let mut h = Sha256::new();
     h.update(b"hush key id v1");
@@ -72,7 +67,6 @@ pub fn key_id(key: &MasterKey) -> String {
     hex::encode(&h.finalize()[..8])
 }
 
-/// The recovery form of the key: 64 hex digits in groups of eight.
 pub fn encode_key(key: &MasterKey) -> Zeroizing<String> {
     let hex = Zeroizing::new(hex::encode(&key[..]));
     let groups: Vec<&str> = (0..8).map(|i| &hex[i * 8..i * 8 + 8]).collect();
@@ -135,5 +129,75 @@ mod tests {
         assert_eq!(&decode_key(&enc.replace('-', " ").to_uppercase()).unwrap()[..], &k[..]);
         assert!(decode_key("abcd").is_err());
         assert_ne!(key_id(&k), key_id(&new_key()));
+    }
+
+    use proptest::prelude::*;
+    use proptest::test_runner::RngSeed;
+
+    fn seeded() -> ProptestConfig {
+        ProptestConfig {
+            cases: 64,
+            rng_seed: RngSeed::Fixed(1),
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        }
+    }
+
+    fn key_from(bytes: [u8; KEY_LEN]) -> MasterKey {
+        Zeroizing::new(bytes)
+    }
+
+    proptest! {
+        #![proptest_config(seeded())]
+
+        #[test]
+        fn seal_then_open_returns_the_plaintext(
+            key in any::<[u8; KEY_LEN]>(),
+            aad in ".{0,40}",
+            plaintext in proptest::collection::vec(any::<u8>(), 0..256),
+        ) {
+            let key = key_from(key);
+            let sealed = seal(&key, &aad, &plaintext).unwrap();
+            prop_assert_eq!(&open(&key, &aad, &sealed).unwrap()[..], &plaintext[..]);
+        }
+
+        #[test]
+        fn any_flipped_bit_or_cut_byte_fails_to_open(
+            key in any::<[u8; KEY_LEN]>(),
+            plaintext in proptest::collection::vec(any::<u8>(), 0..64),
+            at in any::<proptest::sample::Index>(),
+            bit in 0u8..8,
+        ) {
+            let key = key_from(key);
+            let sealed = seal(&key, "hush/v1/a/dev", &plaintext).unwrap();
+            let mut flipped = sealed.clone();
+            flipped[at.index(sealed.len())] ^= 1 << bit;
+            prop_assert!(open(&key, "hush/v1/a/dev", &flipped).is_err());
+            prop_assert!(open(&key, "hush/v1/a/dev", &sealed[..at.index(sealed.len())]).is_err());
+        }
+
+        #[test]
+        fn another_project_environment_or_key_fails_to_open(
+            key in any::<[u8; KEY_LEN]>(),
+            other_key in any::<[u8; KEY_LEN]>(),
+            aad in "[a-z0-9/-]{1,30}",
+            other_aad in "[a-z0-9/-]{1,30}",
+        ) {
+            prop_assume!(aad != other_aad && key != other_key);
+            let sealed = seal(&key_from(key), &aad, b"value").unwrap();
+            prop_assert!(open(&key_from(key), &other_aad, &sealed).is_err());
+            prop_assert!(open(&key_from(other_key), &aad, &sealed).is_err());
+        }
+
+        #[test]
+        fn the_recovery_form_decodes_to_the_same_key(key in any::<[u8; KEY_LEN]>()) {
+            let key = key_from(key);
+            let encoded = encode_key(&key);
+            prop_assert_eq!(encoded.len(), 64 + 7);
+            prop_assert_eq!(&decode_key(&encoded).unwrap()[..], &key[..]);
+            let retyped = encoded.replace('-', " ").to_uppercase();
+            prop_assert_eq!(&decode_key(&retyped).unwrap()[..], &key[..]);
+            prop_assert_eq!(key_id(&key), key_id(&decode_key(&encoded).unwrap()));
+        }
     }
 }

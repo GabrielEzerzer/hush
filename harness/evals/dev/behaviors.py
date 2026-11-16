@@ -1,4 +1,4 @@
-"""Development acceptance cases, mapped to the owner's numbered requirements."""
+# Development acceptance cases, mapped to the numbered requirements.
 
 import json
 import os
@@ -197,7 +197,6 @@ def agent_recovery_key(s):
 def positional_value(s):
     s.linked("stdin-only")
     before = s.vault_snapshot()
-    # Public marker, not a generated secret: clap may echo rejected arguments.
     result = s.hush("set", "CLI_TOKEN", "public-command-line-marker")
     require(result.returncode != 0, "set accepted a positional value")
     require(b"unexpected argument" in result.stderr, "positional value was not refused by argument parsing")
@@ -330,7 +329,6 @@ def native_without_services(s):
     baseline = hush_processes()
     s.setup()
     s.init_git()
-    # Fixture precondition: this deliberate PATH allowlist cannot discover VM tools.
     minimal = str(s.binary.parent)
     for command in ("wsl", "wsl.exe", "docker", "docker.exe"):
         require(shutil.which(command, path=minimal) is None, "precondition: VM/container tool exists on minimal PATH")

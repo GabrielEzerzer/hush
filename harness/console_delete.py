@@ -1,8 +1,6 @@
-"""Drive hush's real Windows console stdin; launched hidden by acceptance.py.
-
-Only project names are put in the console input buffer. No value is entered or printed.
-Recovery mode reads the hidden console screen and emits a value-free result marker.
-"""
+# Drive hush's real Windows console stdin; launched hidden by acceptance.py.
+# Only project names are put in the console input buffer. No value is entered or printed.
+# Recovery mode reads the hidden console screen and emits a value-free result marker.
 
 import ctypes
 from ctypes import wintypes
@@ -13,7 +11,6 @@ import sys
 
 
 def recovery_key(binary):
-    """Both hush handles must be terminals, or its TTY guard masks a missing agent guard."""
     class Coord(ctypes.Structure):
         _fields_ = [("x", wintypes.SHORT), ("y", wintypes.SHORT)]
 
@@ -51,9 +48,7 @@ def recovery_key(binary):
         if not api.ReadConsoleOutputCharacterW(handle, screen, size, Coord(0, 0), ctypes.byref(count)) or count.value != size:
             return 77
         key = os.environ["HUSH_KEY"]
-        # Never forward captured bytes or console contents, including on a mutant.
         output = screen[:count.value] + result.stderr.decode("utf-8", errors="replace")
-        # Recovery output groups hex with dashes; screen wrapping can add whitespace.
         compact = "".join(c for c in output if c != "-" and not c.isspace()).lower()
         if key in compact:
             print("RECOVERY_KEY_EXPOSED")
@@ -114,7 +109,6 @@ def main():
         with open("CONIN$", "rb", buffering=0) as console:
             result = subprocess.run([binary, "project", "delete", project], stdin=console,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
-        # Expose a marker only. The parent verifies vault contents independently.
         if result.returncode == 0:
             print("DELETE_OK")
             return 0

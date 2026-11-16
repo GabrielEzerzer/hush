@@ -1,13 +1,5 @@
 //! The vault: one folder outside every repo, holding one encrypted file per project and environment.
-//!
-//! ```text
-//! <home>/vault.toml                  format version and the key's public fingerprint
-//! <home>/projects/<project>/<env>.hush
-//! <home>/projects/<project>/.lock    held while a write is in progress
-//! ```
-//!
-//! The key lives in the OS keychain, or in `HUSH_KEY` when that is set. When `HUSH_KEY` is set,
-//! the keychain is never read or written, which is how tests and CI stay off the real key.
+//! The key lives in the OS keychain, or in `HUSH_KEY`; while `HUSH_KEY` is set the keychain is never touched.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -36,8 +28,6 @@ pub fn home() -> Result<PathBuf> {
     home_from(std::env::var_os("HUSH_HOME"))
 }
 
-/// A set but empty HUSH_HOME is an error, not a fallback: falling back would point a test or CI
-/// run whose variable expanded to nothing at the real vault.
 fn home_from(var: Option<std::ffi::OsString>) -> Result<PathBuf> {
     match var {
         Some(p) => {
@@ -81,7 +71,6 @@ fn env_key() -> Result<Option<MasterKey>> {
     key_from(std::env::var("HUSH_KEY"))
 }
 
-/// A set but empty HUSH_KEY is an error, not a fallback to the OS keychain.
 fn key_from(var: Result<String, std::env::VarError>) -> Result<Option<MasterKey>> {
     match var {
         Ok(s) => {
@@ -105,7 +94,6 @@ fn create_private_dir(path: &Path) -> Result<()> {
         use std::os::unix::fs::DirBuilderExt;
         fs::DirBuilder::new().recursive(true).mode(0o700).create(path)
     };
-    // On Windows the folder inherits the per-user ACL of %APPDATA%.
     #[cfg(not(unix))]
     let made = fs::create_dir_all(path);
     made.with_context(|| format!("creating {}", path.display()))
@@ -117,11 +105,8 @@ pub struct SetupOutcome {
     pub key_from_env: bool,
 }
 
-/// Creates the vault, or verifies an existing one. Never overwrites a key already in the keychain.
 pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> {
     let meta = read_meta(home)?;
-    // Writing a new vault.toml next to encrypted files would tie them to a key they were not
-    // sealed with. A recovery key is the way back in, so only that may proceed.
     if meta.is_none() && recovered.is_none() {
         refuse_orphaned_files(home)?;
     }
@@ -197,8 +182,6 @@ pub fn setup(home: &Path, recovered: Option<MasterKey>) -> Result<SetupOutcome> 
     })
 }
 
-/// Minting a new key next to encrypted files would lock the user out of them: vault.toml is
-/// missing (a partial copy, say) but the secrets are there, and their key is elsewhere.
 fn refuse_orphaned_files(home: &Path) -> Result<()> {
     let projects = home.join("projects");
     let entries = match fs::read_dir(&projects) {
@@ -223,8 +206,6 @@ fn refuse_orphaned_files(home: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Writes vault.toml through a temporary file that is moved into place only if no vault.toml
-/// exists, so a crash never leaves a partial file and a concurrent setup never overwrites one.
 fn write_new_meta(home: &Path, meta: &str) -> Result<()> {
     let path = home.join("vault.toml");
     let mut tmp = NamedTempFile::new_in(home).context("creating a temporary file in the vault")?;
@@ -252,7 +233,6 @@ pub fn project_exists(home: &Path, project: &str) -> Result<bool> {
     Ok(project_dir(home, project)?.is_dir())
 }
 
-/// Returns whether the project was new.
 pub fn create_project(home: &Path, project: &str) -> Result<bool> {
     require_vault(home)?;
     let dir = project_dir(home, project)?;
@@ -266,11 +246,9 @@ pub fn create_project(home: &Path, project: &str) -> Result<bool> {
 pub fn delete_project(home: &Path, project: &str) -> Result<()> {
     let dir = project_dir(home, project)?;
     ensure!(dir.is_dir(), "no project '{project}' in the vault");
-    // shortcut: does not take the project lock, so a write racing the delete can fail; deletes are rare and manual.
     fs::remove_dir_all(&dir).with_context(|| format!("deleting {}", dir.display()))
 }
 
-/// Every project with the environments that hold secrets. Names are folder names, not secret.
 pub fn projects(home: &Path) -> Result<Vec<(String, Vec<String>)>> {
     require_vault(home)?;
     let mut out = Vec::new();
@@ -339,7 +317,6 @@ impl Vault {
         format!("hush/v1/{project}/{env}")
     }
 
-    /// The environment's secrets, or None if nothing was ever stored there.
     pub fn read(&self, project: &str, env: &str) -> Result<Option<Secrets>> {
         let (_, file) = self.paths(project, env)?;
         let data = match fs::read(&file) {
@@ -349,16 +326,11 @@ impl Vault {
         };
         let plain = crypto::open(&self.key, &Self::aad(project, env), &data)
             .with_context(|| format!("reading {}", file.display()))?;
-        // shortcut: values are zeroized only in the decrypted buffer, not in the map's Strings; upgrade if a threat model includes memory dumps.
-        // serde_json's error can quote the offending value, so only the file name is reported.
         let secrets =
             serde_json::from_slice(&plain).map_err(|_| anyhow::anyhow!("{} holds invalid data", file.display()))?;
         Ok(Some(secrets))
     }
 
-    /// Read, change and rewrite one environment under the project lock. The new file replaces the
-    /// old one by rename, so a crash leaves either the old or the new version, never a partial one.
-    /// If `change` fails, nothing is written.
     pub fn update<T>(&self, project: &str, env: &str, change: impl FnOnce(&mut Secrets) -> Result<T>) -> Result<T> {
         let (dir, file) = self.paths(project, env)?;
         let lock = fs::OpenOptions::new()
@@ -427,6 +399,57 @@ mod tests {
             "temporary file left behind"
         );
     }
+
+    use proptest::prelude::*;
+    use proptest::test_runner::RngSeed;
+
+    fn seeded() -> ProptestConfig {
+        ProptestConfig {
+            cases: 24,
+            rng_seed: RngSeed::Fixed(3),
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        }
+    }
+
+    proptest! {
+        #![proptest_config(seeded())]
+
+        #[test]
+        fn updates_read_back_as_one_map_and_never_reach_the_disk_in_plaintext(
+            writes in proptest::collection::vec(("[A-Z_][A-Z0-9_]{0,8}", "[^\u{0}]{8,40}"), 1..6),
+        ) {
+            let home = tempfile::tempdir().unwrap();
+            fs::create_dir_all(home.path().join("projects").join("demo")).unwrap();
+            let vault = Vault {
+                home: home.path().to_path_buf(),
+                key: crypto::new_key(),
+            };
+            let mut expected = Secrets::new();
+            for (name, value) in &writes {
+                vault
+                    .update("demo", "dev", |s| {
+                        s.insert(name.clone(), value.clone());
+                        Ok(())
+                    })
+                    .unwrap();
+                expected.insert(name.clone(), value.clone());
+            }
+            prop_assert_eq!(vault.read("demo", "dev").unwrap(), Some(expected));
+
+            let file = home.path().join("projects").join("demo").join("dev.hush");
+            let on_disk = fs::read(&file).unwrap();
+            for (_, value) in &writes {
+                prop_assert!(!on_disk.windows(value.len()).any(|w| w == value.as_bytes()));
+            }
+            let refused = vault.update("demo", "dev", |s| -> Result<()> {
+                s.clear();
+                bail!("refused")
+            });
+            prop_assert!(refused.is_err());
+            prop_assert_eq!(fs::read(&file).unwrap(), on_disk);
+        }
+    }
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -457,7 +480,6 @@ mod keychain {
         entry()?
             .set_password(&crypto::encode_key(key))
             .context("saving the hush key to the OS keychain")?;
-        // Read it back: a keychain that accepts the key but cannot return it would lose every secret.
         let back = load()?.context("the OS keychain did not keep the hush key")?;
         ensure!(
             back[..] == key[..],
