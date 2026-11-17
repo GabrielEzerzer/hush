@@ -35,9 +35,9 @@ def require(condition, message):
         raise Failure(message)
 
 
-def scenario(identifier, point):
+def scenario(identifier, point, windows_only=False):
     def register(function):
-        SCENARIOS.append((identifier, point, function))
+        SCENARIOS.append((identifier, point, windows_only, function))
         return function
     return register
 
@@ -55,7 +55,18 @@ def clean_environment():
 
 
 def hush_processes():
-    require(os.name == "nt", "this scenario requires native Windows")
+    if os.name != "nt":
+        proc = Path("/proc")
+        if not proc.is_dir():
+            raise Skip("the process check needs Windows or /proc")
+        found = set()
+        for entry in proc.iterdir():
+            try:
+                if entry.name.isdigit() and (entry / "comm").read_text().strip() == "hush":
+                    found.add(int(entry.name))
+            except OSError:
+                pass
+        return found
     import ctypes
     from ctypes import wintypes
 
@@ -390,11 +401,11 @@ def main():
         build_error = build_error or "hush binary does not exist"
     new_project = Path(args.new_project).resolve() if args.new_project else None
     passed = skipped = 0
-    for identifier, point, function in SCENARIOS:
+    for identifier, point, windows_only, function in SCENARIOS:
         box = None
         failure = build_error
-        skip = None
-        if failure is None:
+        skip = "needs native Windows" if windows_only and os.name != "nt" else None
+        if failure is None and skip is None:
             try:
                 box = Sandbox(binary, new_project)
                 function(box)

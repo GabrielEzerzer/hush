@@ -48,3 +48,16 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --locked
+      - name: Acceptance scenarios
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --locked
+          python3 harness/acceptance.py --hush target/debug/hush
+          python3 harness/acceptance.py --set test --hush target/debug/hush
+      - name: Secret Service keyring
+        if: runner.os == 'Linux'
+        run: |
+          if ldd target/debug/hush | grep libdbus; then echo "hush links libdbus dynamically"; exit 1; fi
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends dbus gnome-keyring libsecret-tools
+          dbus-run-session -- sh -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets > /dev/null && python3 harness/secret_service.py target/debug/hush'

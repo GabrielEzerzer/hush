@@ -499,6 +499,68 @@ fn run_finds_cmd_shims_on_path_like_npm() {
     assert_eq!(out.trim_end(), "via-shim");
 }
 
+#[cfg(unix)]
+#[test]
+fn run_hands_signals_to_the_child_and_returns_its_status() {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::ExitStatusExt;
+    use std::time::{Duration, Instant};
+
+    let env = Env::with_project("demo");
+    env.set(&["A"], "1");
+    for (signal, code) in [("INT", 42), ("TERM", 43)] {
+        let script = format!("trap 'exit {code}' {signal}; echo ready; while :; do sleep 0.05; done");
+        let mut c = env.cmd(KEY_A);
+        c.args(["run", "--", "sh", "-c", &script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = c.spawn().unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(line.trim(), "ready");
+        let sent = Command::new("kill")
+            .arg(format!("-{signal}"))
+            .arg(child.id().to_string())
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(s) = child.try_wait().unwrap() {
+                break s;
+            }
+            if Instant::now() > deadline {
+                child.kill().unwrap();
+                panic!("SIG{signal} did not reach the child");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(status.code(), Some(code), "SIG{signal}: {status:?}");
+    }
+    let r = env.hush(&["run", "--", "sh", "-c", "kill -TERM $$"]).fails();
+    assert_eq!(r.out.status.signal(), Some(15), "{:?}", r.out.status);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn without_a_secret_service_setup_and_reads_point_to_hush_key() {
+    let env = Env::with_project("demo");
+    let fresh = TempDir::new().unwrap();
+    for (vault, args) in [(fresh.path(), &["setup"][..]), (env.home.path(), &["list"][..])] {
+        let mut c = env.cmd(KEY_A);
+        c.env_remove("HUSH_KEY")
+            .env("HUSH_HOME", vault)
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/hush-test-bus");
+        env.run_with(c, args, None)
+            .fails()
+            .stderr_has("set HUSH_KEY")
+            .stderr_has("#machines-without-a-keychain");
+    }
+}
+
 #[test]
 fn import_reads_dotenv_rules_and_export_round_trips() {
     let env = Env::with_project("demo");

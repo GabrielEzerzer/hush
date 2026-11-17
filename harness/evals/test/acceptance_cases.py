@@ -65,7 +65,7 @@ def main_custom_note(s):
             and "tags: [offline, fixture]" in note.read_text(), "main lost custom note metadata or location")
 
 
-@scenario("test-npm-dev-launches-a-commonjs-task-with-two-secrets", 3)
+@scenario("test-npm-dev-launches-a-commonjs-task-with-two-secrets", 3, windows_only=True)
 def npm_commonjs(s):
     s.linked("node-task")
     expected = {"SERVICE_AUTH": s.value(), "CACHE_AUTH": s.value()}
@@ -110,7 +110,7 @@ def piped_record(s):
     s.app_run({"RECORD_TOKEN": value})
 
 
-@scenario("test-console-delete-removes-all-envs-and-keeps-other-project", 5)
+@scenario("test-console-delete-removes-all-envs-and-keeps-other-project", 5, windows_only=True)
 def project_delete(s):
     s.linked("remove-this")
     s.put("TOKEN", s.value())
