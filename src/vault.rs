@@ -400,6 +400,29 @@ mod tests {
         );
     }
 
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_missing_secret_service_points_to_hush_key() {
+        let cause = || Box::new(std::io::Error::other("org.freedesktop.DBus.Error.ServiceUnknown"));
+        for (e, linux) in [
+            (keyring::Error::PlatformFailure(cause()), keychain::NO_SECRET_SERVICE),
+            (keyring::Error::NoStorageAccess(cause()), keychain::KEYRING_LOCKED),
+        ] {
+            let message = format!("{:#}", keychain::failed(e, "reading the hush key"));
+            assert!(message.contains("ServiceUnknown"), "{message}");
+            if cfg!(target_os = "linux") {
+                assert!(message.starts_with(linux), "{message}");
+            } else {
+                assert!(message.starts_with("reading the hush key: "), "{message}");
+            }
+        }
+        let message = format!(
+            "{:#}",
+            keychain::failed(keyring::Error::BadEncoding(vec![0xff]), "reading the hush key")
+        );
+        assert!(message.starts_with("reading the hush key: "), "{message}");
+    }
+
     use proptest::prelude::*;
     use proptest::test_runner::RngSeed;
 
@@ -452,15 +475,44 @@ mod tests {
     }
 }
 
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod keychain {
     use super::*;
 
     const SERVICE: &str = "hush";
     const ACCOUNT: &str = "vault-key";
 
+    #[cfg(windows)]
+    fn credential() -> keyring::Result<keyring::windows::WinCredential> {
+        keyring::windows::WinCredential::new_with_target(None, SERVICE, ACCOUNT)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn credential() -> keyring::Result<keyring::macos::MacCredential> {
+        keyring::macos::MacCredential::new_with_target(None, SERVICE, ACCOUNT)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn credential() -> keyring::Result<keyring::secret_service::SsCredential> {
+        keyring::secret_service::SsCredential::new_with_target(None, SERVICE, ACCOUNT)
+    }
+
     fn entry() -> Result<keyring::Entry> {
-        keyring::Entry::new(SERVICE, ACCOUNT).context("opening the OS keychain")
+        let credential = credential().map_err(|e| failed(e, "opening the OS keychain"))?;
+        Ok(keyring::Entry::new_with_credential(Box::new(credential)))
+    }
+
+    pub const NO_SECRET_SERVICE: &str = "cannot reach a Secret Service keyring (it needs a D-Bus session and a running keyring such as GNOME Keyring or KWallet); set HUSH_KEY to the vault key instead, see https://github.com/GabrielEzerzer/hush#machines-without-a-keychain";
+
+    pub const KEYRING_LOCKED: &str = "the Secret Service keyring is locked, its unlock prompt was dismissed, or there is no default keyring; unlock or create one and run the command again, or set HUSH_KEY, see https://github.com/GabrielEzerzer/hush#machines-without-a-keychain";
+
+    pub fn failed(e: keyring::Error, doing: &'static str) -> anyhow::Error {
+        let context = match e {
+            keyring::Error::PlatformFailure(_) if cfg!(target_os = "linux") => NO_SECRET_SERVICE,
+            keyring::Error::NoStorageAccess(_) if cfg!(target_os = "linux") => KEYRING_LOCKED,
+            _ => doing,
+        };
+        anyhow::Error::new(e).context(context)
     }
 
     pub fn load() -> Result<Option<MasterKey>> {
@@ -472,14 +524,14 @@ mod keychain {
                 ))
             }
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e).context("reading the hush key from the OS keychain"),
+            Err(e) => Err(failed(e, "reading the hush key from the OS keychain")),
         }
     }
 
     pub fn store(key: &MasterKey) -> Result<()> {
         entry()?
             .set_password(&crypto::encode_key(key))
-            .context("saving the hush key to the OS keychain")?;
+            .map_err(|e| failed(e, "saving the hush key to the OS keychain"))?;
         let back = load()?.context("the OS keychain did not keep the hush key")?;
         ensure!(
             back[..] == key[..],
@@ -489,7 +541,7 @@ mod keychain {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod keychain {
     use super::*;
 

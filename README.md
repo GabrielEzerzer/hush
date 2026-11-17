@@ -14,9 +14,9 @@ The demo uses a throwaway vault and fake values. [`docs-assets/demo.tape`](docs-
 |---|---|---|
 | Windows | Windows Credential Manager | Tested; this is the platform hush is used on |
 | macOS | Keychain | Built and tested in CI, but the Keychain code has not been tried on a real Mac |
-| Linux | none yet | No keychain support. Set `HUSH_KEY` instead ([tracking issue](https://github.com/GabrielEzerzer/hush/issues/9)) |
+| Linux | Secret Service (GNOME Keyring, KWallet) | Tested in CI against GNOME Keyring. Headless machines, WSL and containers usually have no Secret Service; set `HUSH_KEY` there |
 
-The tests run on all three in CI. They use `HUSH_KEY`, so they never touch a keychain.
+The tests run on all three in CI. They use `HUSH_KEY`, so they never touch a keychain, except one Linux check that stores, reuses and recovers the key through a throwaway GNOME Keyring.
 
 ## Install
 
@@ -28,7 +28,7 @@ The tests run on all three in CI. They use `HUSH_KEY`, so they never touch a key
 cargo install --git https://github.com/GabrielEzerzer/hush --locked
 ```
 
-**From source.** You need Rust 1.89 or newer.
+**From source.** You need Rust 1.89 or newer. On Linux you also need a C compiler, which builds the bundled D-Bus library hush uses to reach the Secret Service.
 
 ```sh
 git clone https://github.com/GabrielEzerzer/hush
@@ -43,9 +43,9 @@ hush setup
 hush recovery-key             # save the key it prints in your password manager
 ```
 
-`hush setup` creates the vault at `%APPDATA%\hush` (macOS: `~/Library/Application Support/hush`) and a random 256-bit key, which it stores in Windows Credential Manager (macOS: Keychain). Without the recovery key, losing the keychain entry means losing every secret, so save it before you store anything.
+`hush setup` creates the vault at `%APPDATA%\hush` (macOS: `~/Library/Application Support/hush`, Linux: `~/.local/share/hush`) and a random 256-bit key, which it stores in Windows Credential Manager (macOS: Keychain, Linux: the Secret Service, such as GNOME Keyring or KWallet). Without the recovery key, losing the keychain entry means losing every secret, so save it before you store anything.
 
-On Linux, see [Machines without a keychain](#machines-without-a-keychain).
+On Linux, hush needs a desktop session with a running keyring. Without one, `hush setup` stops with an error that points to [Machines without a keychain](#machines-without-a-keychain). If the keyring is locked or has no default collection, hush asks you to unlock or create one, or to set `HUSH_KEY`.
 
 ## Using it in a project
 
@@ -71,7 +71,7 @@ Point the scripts that need secrets at `hush run` so nobody has to remember it:
 
 Only `dev` and scripts that need secrets go through `hush run`. Keep `build`, and tests that need no secrets, as plain commands, so CI, Vercel and cloud sandboxes, which have no vault, can still run them.
 
-Any program works the same way: `hush run -- python main.py`, `hush run -- cargo run`, `hush run -- supabase start`. The app reads its secrets from environment variables as it already does. A value in the vault takes precedence over a variable of the same name already set in the shell. On Windows, `hush run` finds `.cmd` and `.bat` shims on `PATH`, so `npm`, `npx` and `pnpm` work by name. If `HUSH_KEY` is set in the shell, `hush run` removes it from the program's environment, since the program never needs the vault key.
+Any program works the same way: `hush run -- python main.py`, `hush run -- cargo run`, `hush run -- supabase start`. The app reads its secrets from environment variables as it already does. A value in the vault takes precedence over a variable of the same name already set in the shell. The program's exit code is passed back, and Ctrl+C reaches the program, which decides when to stop. On macOS and Linux, hush replaces itself with the program, so the program keeps hush's process ID and gets every signal sent to it. On Windows, `hush run` finds `.cmd` and `.bat` shims on `PATH`, so `npm`, `npx` and `pnpm` work by name. If `HUSH_KEY` is set in the shell, `hush run` removes it from the program's environment, since the program never needs the vault key.
 
 ## Commands
 
@@ -130,11 +130,11 @@ This guards against accidents, not against an agent working around it: it can't 
 
 ## A new machine
 
-Copy the vault folder (`%APPDATA%\hush`, or `HUSH_HOME` if you set it) across, install hush, and run `hush setup --recover`, which asks for the recovery key and puts it in the new machine's keychain.
+Copy the vault folder (`%APPDATA%\hush`, `~/Library/Application Support/hush` or `~/.local/share/hush`, or `HUSH_HOME` if you set it) across, install hush, and run `hush setup --recover`, which asks for the recovery key and puts it in the new machine's keychain.
 
 ## Machines without a keychain
 
-On Linux, in CI or in a cloud sandbox, set `HUSH_KEY` to the vault key (the recovery key, or 64 hex digits) and, if the vault is not in the default place (`~/.local/share/hush` on Linux), `HUSH_HOME` to the vault folder. While `HUSH_KEY` is set, hush never reads or writes the OS keychain. To start a new vault on Linux:
+On a Linux server or container, in WSL, in CI or in a cloud sandbox there is usually no keychain: on Linux hush uses the Secret Service, which needs a D-Bus session and a keyring daemon such as GNOME Keyring or KWallet. There, set `HUSH_KEY` to the vault key (the recovery key, or 64 hex digits) and, if the vault is not in the default place (`~/.local/share/hush` on Linux), `HUSH_HOME` to the vault folder. While `HUSH_KEY` is set, hush never reads or writes the OS keychain. To start a new vault on such a machine:
 
 ```sh
 export HUSH_KEY="$(openssl rand -hex 32)"   # keep this value somewhere safe, such as a password manager
@@ -157,7 +157,7 @@ python -m unittest discover -s setup/lint/tests
 
 The lint needs [ast-grep](https://ast-grep.github.io) 0.51.1 on `PATH` (`pip install ast-grep-cli==0.51.1`); see [setup/lint/README.md](setup/lint/README.md). `features.json` lists every command, and `cargo test` fails when a command or flag is missing from it.
 
-The tests give every case its own vault in a temp folder and a fixed `HUSH_KEY`, so they never touch the real keychain or the real vault. `harness/` holds a slower Windows acceptance suite; see [harness/README.md](harness/README.md).
+The tests give every case its own vault in a temp folder and a fixed `HUSH_KEY`, so they never touch the real keychain or the real vault. `harness/` holds a slower acceptance suite, written for Windows, whose platform-neutral scenarios also run on Linux, and the Linux Secret Service check; see [harness/README.md](harness/README.md).
 
 ## Security
 

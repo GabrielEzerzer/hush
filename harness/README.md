@@ -1,8 +1,11 @@
 # Hush acceptance suite
 
-Run from a hush checkout with Python 3 on native Windows. The suite uses only
-the Python standard library; Git, the Rust toolchain, Node.js, and npm must be
-installed. No npm install, network access, VM, container, server, or daemon is
+Run from a hush checkout with Python 3 on native Windows or Linux. The suite
+uses only the Python standard library; Git and the Rust toolchain must be
+installed, and on Windows Node.js and npm too. Off Windows, the scenarios marked
+`windows_only` (native console input, `npm.cmd` shims) print
+`SKIP id: needs native Windows`, and the process checks read `/proc`. CI runs
+both sets on Linux. No npm install, network access, VM, container, server, or daemon is
 needed for scenarios.
 
 ```powershell
@@ -107,3 +110,21 @@ PATH is a fixture precondition, not a behavioral assertion about hush. The
 behavioral checks run hush in a Git repo and a descendant with that PATH,
 verify application hashes and exit status, and check for surviving hush
 processes. They do not uninstall tools from the machine.
+
+## Secret Service check
+
+`secret_service.py` tests the Linux keychain path, which every other test
+avoids by setting `HUSH_KEY`. With `HUSH_KEY` unset it runs `hush setup`,
+checks with `secret-tool` that the key landed in the Secret Service, reads a
+secret back from later hush processes, refuses `setup --recover` with a
+different key, removes the stored key, and restores it with `setup --recover`
+typed at a pseudo-terminal. It refuses to start when a hush key is already
+stored, and removes the key it stored when it ends, so run it only in a
+throwaway session:
+
+```sh
+dbus-run-session -- sh -c 'printf throwaway | gnome-keyring-daemon --daemonize --unlock --components=secrets > /dev/null && python3 harness/secret_service.py target/debug/hush'
+```
+
+It needs `dbus-run-session`, `gnome-keyring-daemon` and `secret-tool`
+(Debian and Ubuntu packages `dbus`, `gnome-keyring` and `libsecret-tools`).

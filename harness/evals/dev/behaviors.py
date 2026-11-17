@@ -103,7 +103,7 @@ def link_preserves_ignore(s):
     require(s.ignored("cache/file") and s.ignored(".env.local"), "existing or new ignore rules lost")
 
 
-@scenario("windows-npm-dev-script-routes-through-hush", 3)
+@scenario("windows-npm-dev-script-routes-through-hush", 3, windows_only=True)
 def npm_dev(s):
     s.linked("npm-project")
     value = s.value()
@@ -114,7 +114,7 @@ def npm_dev(s):
     require(not (s.repo / "node_modules").exists(), "npm scenario installed dependencies")
 
 
-@scenario("windows-hush-run-resolves-npm-cmd", 3)
+@scenario("windows-hush-run-resolves-npm-cmd", 3, windows_only=True)
 def hush_launches_npm(s):
     require(os.name == "nt" and s.npm is not None, "Windows npm.cmd is required")
     s.linked()
@@ -183,7 +183,7 @@ def agent_export(s):
         require(not result.stdout, "agent export wrote output")
 
 
-@scenario("agent-recovery-key-is-refused-in-a-real-console", 4)
+@scenario("agent-recovery-key-is-refused-in-a-real-console", 4, windows_only=True)
 def agent_recovery_key(s):
     s.setup()
     before = s.vault_snapshot()
@@ -238,7 +238,7 @@ def delete_non_tty(s):
     s.app_run({"KEEP_TOKEN": value})
 
 
-@scenario("native-console-delete-requires-and-accepts-typed-name", 5)
+@scenario("native-console-delete-requires-and-accepts-typed-name", 5, windows_only=True)
 def delete_real_console(s):
     s.linked("console-project")
     s.put("DELETE_TOKEN", s.value())
