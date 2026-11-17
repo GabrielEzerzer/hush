@@ -94,8 +94,10 @@ impl Env {
         {
             use std::io::Write;
             let mut pipe = child.stdin.take().unwrap();
-            if let Some(input) = stdin {
-                pipe.write_all(input).unwrap();
+            if let Some(input) = stdin
+                && let Err(e) = pipe.write_all(input)
+            {
+                assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "{e}");
             }
         }
         Run {
