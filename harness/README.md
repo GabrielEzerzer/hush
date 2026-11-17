@@ -123,7 +123,7 @@ stored, and removes the key it stored when it ends, so run it only in a
 throwaway session:
 
 ```sh
-dbus-run-session -- sh -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets > /dev/null && python3 harness/secret_service.py target/debug/hush'
+dbus-run-session -- sh -c 'printf throwaway | gnome-keyring-daemon --daemonize --unlock --components=secrets > /dev/null && python3 harness/secret_service.py target/debug/hush'
 ```
 
 It needs `dbus-run-session`, `gnome-keyring-daemon` and `secret-tool`
