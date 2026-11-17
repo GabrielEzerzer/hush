@@ -28,7 +28,7 @@ The tests run on all three in CI. They use `HUSH_KEY`, so they never touch a key
 cargo install --git https://github.com/GabrielEzerzer/hush --locked
 ```
 
-**From source.** You need Rust 1.89 or newer.
+**From source.** You need Rust 1.89 or newer. On Linux you also need a C compiler, which builds the bundled D-Bus library hush uses to reach the Secret Service.
 
 ```sh
 git clone https://github.com/GabrielEzerzer/hush
