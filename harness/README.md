@@ -24,9 +24,9 @@ python harness/acceptance.py --hush C:/path/to/hush.exe
 The supplied binary must be named `hush.exe` (`hush` off Windows), so npm and
 executable discovery on PATH select the same binary as direct calls.
 
-Some scenarios test a project creation script, `new-project.py`, that lives in
-the author's private workspace and is not part of this repo. Pass its path with
-`--new-project`, or set `HUSH_ACCEPTANCE_NEW_PROJECT`, to run them:
+Some scenarios test an external project creation script, `new-project.py`,
+which is not part of this repo. Pass its path with `--new-project`, or set
+`HUSH_ACCEPTANCE_NEW_PROJECT`, to run them:
 
 ```powershell
 python harness/acceptance.py --new-project C:/path/to/new-project.py
@@ -44,10 +44,11 @@ does not exist, or a script without `link_hush`, is an acceptance failure,
 never a skip or a fallback to a different script.
 Additional cases run `main` with `--no-github`, temporary CODE/VAULT/GOALS paths,
 and a temporary goal note. The `run` stub allows real Git init/add in that repo,
-leaves the index staged instead of committing, and intercepts T3. It refuses
+leaves the index staged instead of committing, and stubs the project
+registration command the script keeps in `T3`. It refuses
 other commands. Both sets assert that the hush vault project exists and both
 link files are staged; the held-out case uses custom note metadata and a note
-path containing spaces. No real GitHub, T3, or personal-vault action runs.
+path containing spaces. No real GitHub, project registration or note write runs.
 A `SystemExit` from `main` is caught and reported as a failure: it is not an
 `Exception`, so letting it through would end the run with no SCORE line.
 
@@ -55,8 +56,8 @@ There are 31 development scenarios and 14 held-out scenarios. Each scenario
 reports `PASS id: point N` or `FAIL id: point N: reason`; the last line is
 `SCORE: n/m`. Exit status is zero only for a full score. The sets use different
 data and app shapes; they share only the execution and isolation helpers.
-Freeze both eval directories when beginning implementation work. Fix workers
-should read the development set only.
+Freeze both eval directories before changing hush to pass them. Anyone fixing a
+failure should read the development set only.
 
 Every scenario has a fresh temporary vault and repo. Every command that can
 invoke hush receives that vault as `HUSH_HOME` and a fixed 64-hex test key as
