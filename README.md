@@ -45,7 +45,7 @@ hush recovery-key             # save the key it prints in your password manager
 
 `hush setup` creates the vault at `%APPDATA%\hush` (macOS: `~/Library/Application Support/hush`, Linux: `~/.local/share/hush`) and a random 256-bit key, which it stores in Windows Credential Manager (macOS: Keychain, Linux: the Secret Service, such as GNOME Keyring or KWallet). Without the recovery key, losing the keychain entry means losing every secret, so save it before you store anything.
 
-On Linux, hush needs a desktop session with a running keyring. Without one, `hush setup` stops with an error that points to [Machines without a keychain](#machines-without-a-keychain). If the keyring is locked, hush asks you to unlock it and run the command again.
+On Linux, hush needs a desktop session with a running keyring. Without one, `hush setup` stops with an error that points to [Machines without a keychain](#machines-without-a-keychain). If the keyring is locked or has no default collection, hush asks you to unlock or create one, or to set `HUSH_KEY`.
 
 ## Using it in a project
 

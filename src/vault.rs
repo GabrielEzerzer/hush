@@ -504,7 +504,7 @@ mod keychain {
 
     pub const NO_SECRET_SERVICE: &str = "cannot reach a Secret Service keyring (it needs a D-Bus session and a running keyring such as GNOME Keyring or KWallet); set HUSH_KEY to the vault key instead, see https://github.com/GabrielEzerzer/hush#machines-without-a-keychain";
 
-    pub const KEYRING_LOCKED: &str = "the Secret Service keyring is locked or the unlock prompt was dismissed; unlock the keyring and run the command again";
+    pub const KEYRING_LOCKED: &str = "the Secret Service keyring is locked, its unlock prompt was dismissed, or there is no default keyring; unlock or create one and run the command again, or set HUSH_KEY, see https://github.com/GabrielEzerzer/hush#machines-without-a-keychain";
 
     pub fn failed(e: keyring::Error, doing: &'static str) -> anyhow::Error {
         let context = match e {
