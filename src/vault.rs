@@ -404,15 +404,14 @@ mod tests {
     #[test]
     fn a_missing_secret_service_points_to_hush_key() {
         let cause = || Box::new(std::io::Error::other("org.freedesktop.DBus.Error.ServiceUnknown"));
-        for e in [
-            keyring::Error::PlatformFailure(cause()),
-            keyring::Error::NoStorageAccess(cause()),
+        for (e, linux) in [
+            (keyring::Error::PlatformFailure(cause()), keychain::NO_SECRET_SERVICE),
+            (keyring::Error::NoStorageAccess(cause()), keychain::KEYRING_LOCKED),
         ] {
             let message = format!("{:#}", keychain::failed(e, "reading the hush key"));
             assert!(message.contains("ServiceUnknown"), "{message}");
             if cfg!(target_os = "linux") {
-                assert!(message.starts_with(keychain::NO_SECRET_SERVICE), "{message}");
-                assert!(message.contains("HUSH_KEY") && message.contains("#machines-without-a-keychain"));
+                assert!(message.starts_with(linux), "{message}");
             } else {
                 assert!(message.starts_with("reading the hush key: "), "{message}");
             }
@@ -503,18 +502,17 @@ mod keychain {
         Ok(keyring::Entry::new_with_credential(Box::new(credential)))
     }
 
-    pub const NO_SECRET_SERVICE: &str = "cannot reach a Secret Service keyring (it needs a D-Bus session and an unlocked keyring such as GNOME Keyring or KWallet); set HUSH_KEY to the vault key instead, see https://github.com/GabrielEzerzer/hush#machines-without-a-keychain";
+    pub const NO_SECRET_SERVICE: &str = "cannot reach a Secret Service keyring (it needs a D-Bus session and a running keyring such as GNOME Keyring or KWallet); set HUSH_KEY to the vault key instead, see https://github.com/GabrielEzerzer/hush#machines-without-a-keychain";
+
+    pub const KEYRING_LOCKED: &str = "the Secret Service keyring is locked or the unlock prompt was dismissed; unlock the keyring and run the command again";
 
     pub fn failed(e: keyring::Error, doing: &'static str) -> anyhow::Error {
-        let no_store = matches!(
-            e,
-            keyring::Error::PlatformFailure(_) | keyring::Error::NoStorageAccess(_)
-        );
-        if cfg!(target_os = "linux") && no_store {
-            anyhow::Error::new(e).context(NO_SECRET_SERVICE)
-        } else {
-            anyhow::Error::new(e).context(doing)
-        }
+        let context = match e {
+            keyring::Error::PlatformFailure(_) if cfg!(target_os = "linux") => NO_SECRET_SERVICE,
+            keyring::Error::NoStorageAccess(_) if cfg!(target_os = "linux") => KEYRING_LOCKED,
+            _ => doing,
+        };
+        anyhow::Error::new(e).context(context)
     }
 
     pub fn load() -> Result<Option<MasterKey>> {
